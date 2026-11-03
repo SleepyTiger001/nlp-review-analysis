@@ -169,6 +169,14 @@
   .cdot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 7px; flex-shrink: 0; }
   .cdot.pos { background: var(--pos); }
   .cdot.neg { background: var(--neg); }
+  .cdot.neutral { background: #6366f1; }
+  .verdict.score { color: #4338ca; background: #eef2ff; }
+  .nl.neutral { background: #eef2ff; color: #4338ca; }
+  /* 回归任务的输出是连续值，隐藏二分类专用的标尺与堆叠图例 */
+  body.regression .gauge, body.regression .gauge-labels { display: none; }
+  body.regression .c-hist .legend span:nth-child(-n+2) { display: none; }
+  body.regression .dot.pos { background: #e11d48; }
+  body.regression .dot.neg { background: #2563eb; }
 
   .hm-wrap { flex: 1; min-height: 0; position: relative; margin-top: 4px; }
   #heatmap { position: absolute; inset: 0; width: 100%; height: 100%; }
@@ -223,6 +231,7 @@
   </div>
   <div class="badges">
     <span class="badge" id="badge-model">…</span>
+    <span class="badge hidden" id="badge-metric"></span>
     <span class="badge hidden" id="badge-device"></span>
     <span class="badge hidden" id="badge-env"></span>
     <span class="badge hidden" id="badge-latency"></span>
@@ -232,7 +241,7 @@
 <main>
   <div class="row-top">
     <section class="card c-input">
-      <h2>输入中文评论</h2>
+      <h2>输入文本</h2>
       <textarea id="text" placeholder="例：这家酒店位置很好，服务也很周到。"></textarea>
       <div class="row"><span id="charcount">0 字</span></div>
       <div class="actions">
@@ -323,6 +332,7 @@ const EXAMPLES = [
 ];
 
 let modelInfo = null;
+let isRegression = false;
 let modelReady = Promise.resolve(false);   // 页面刚打开、模型仍在加载时，预测会等它就绪
 let space = null;          // {points, labels}
 let histData = null;       // {margins, labels}
@@ -390,16 +400,24 @@ async function init() {
   modelReady = (async () => {
     try {
       modelInfo = await api("/api/model");
+      isRegression = modelInfo.task === "regression";
+      document.body.classList.toggle("regression", isRegression);
+      document.querySelector(".c-result h2").textContent = isRegression ? "预测结果" : "判定结果";
       const params = Object.entries(modelInfo.best_params || {})
         .map(([k, v]) => k + "=" + v).join(", ");
       $("badge-model").textContent =
         modelInfo.embedding_model + " · " + modelInfo.classifier + (params ? " (" + params + ")" : "");
+      const metrics = modelInfo.metrics || {};
+      $("badge-metric").textContent = isRegression
+        ? "测试 R² " + Number(metrics.r2 ?? 0).toFixed(3)
+        : "测试 Acc " + Number(metrics.accuracy ?? 0).toFixed(3);
+      $("badge-metric").classList.remove("hidden");
       $("badge-device").textContent = "设备：" + modelInfo.device;
       $("badge-device").classList.remove("hidden");
       $("vec-dim").textContent = modelInfo.embedding_dim;
       N_DIMS = modelInfo.embedding_dim;
-      const labelPos = modelInfo.labels[1] || "类别 1";
-      const labelNeg = modelInfo.labels[0] || "类别 0";
+      const labelPos = isRegression ? "高分" : (modelInfo.labels[1] || "类别 1");
+      const labelNeg = isRegression ? "低分" : (modelInfo.labels[0] || "类别 0");
       document.querySelectorAll(".label-pos").forEach((el) => { el.textContent = labelPos; });
       document.querySelectorAll(".label-neg").forEach((el) => { el.textContent = labelNeg; });
       $("gauge-pos").textContent = labelPos + " →";
@@ -462,15 +480,20 @@ function renderResult(r, textForHistory) {
   $("result-empty").classList.add("hidden");
   $("result").classList.remove("hidden");
 
+  const reg = r.task === "regression";
   const v = $("verdict");
-  v.textContent = shortLabel(r.label);
-  v.className = "verdict " + (r.label_id === 1 ? "pos" : "neg");
+  v.textContent = reg ? Number(r.value).toFixed(2) : shortLabel(r.label);
+  v.className = "verdict " + (reg ? "score" : (r.label_id === 1 ? "pos" : "neg"));
 
-  const pct = 50 + 50 * Math.max(-1, Math.min(1, r.margin / MARGIN_SCALE));
-  $("gauge-marker").style.left = pct + "%";
+  if (!reg) {
+    const pct = 50 + 50 * Math.max(-1, Math.min(1, r.margin / MARGIN_SCALE));
+    $("gauge-marker").style.left = pct + "%";
+  }
 
   $("facts").innerHTML = "";
-  const facts = [["决策值", fmt(r.margin)], ["维度", r.dim], ["L2 范数", r.norm.toFixed(4)]];
+  const facts = reg
+    ? [["预测评分", Number(r.value).toFixed(2)], ["L2 范数", r.norm.toFixed(4)]]
+    : [["决策值", fmt(r.margin)], ["L2 范数", r.norm.toFixed(4)]];
   for (const [k, val] of facts) {
     const d = document.createElement("div");
     d.className = "fact";
@@ -479,11 +502,11 @@ function renderResult(r, textForHistory) {
     d.querySelector("span").textContent = k;
     $("facts").appendChild(d);
   }
-  if (textForHistory !== undefined) pushHistory(textForHistory, r.label_id);
+  if (textForHistory !== undefined) pushHistory(textForHistory, r.label_id, reg);
 }
 
-function pushHistory(text, labelId) {
-  history.unshift({ text, labelId });
+function pushHistory(text, labelId, reg) {
+  history.unshift({ text, labelId, reg });
   if (history.length > 6) history.pop();
   const box = $("history");
   box.innerHTML = "";
@@ -491,7 +514,7 @@ function pushHistory(text, labelId) {
     const c = document.createElement("span");
     c.className = "chip";
     c.innerHTML = "<i class='cdot'></i><span class='txt'></span>";
-    c.querySelector("i").classList.add(h.labelId === 1 ? "pos" : "neg");
+    c.querySelector("i").classList.add(h.reg ? "neutral" : (h.labelId === 1 ? "pos" : "neg"));
     c.querySelector(".txt").textContent = h.text;
     c.title = h.text;
     c.addEventListener("click", () => {
@@ -560,7 +583,7 @@ async function loadNeighbors(body) {
       const sim = document.createElement("span");
       sim.className = "sim"; sim.textContent = it.sim.toFixed(3);
       const tag = document.createElement("span");
-      tag.className = "nl " + (it.label_id === 1 ? "pos" : "neg");
+      tag.className = "nl " + (isRegression ? "neutral" : (it.label_id === 1 ? "pos" : "neg"));
       tag.textContent = shortLabel(it.label);
       const tx = document.createElement("span");
       tx.className = "ntext";
@@ -580,10 +603,12 @@ async function loadNeighbors(body) {
 async function loadHist() {
   try {
     histData = await api("/api/hist");
-    // 标尺量程按测试集决策值的 95 分位自适应，换模型后不用改代码
-    const abs = histData.margins.map(Math.abs).sort((a, b) => a - b);
-    const q95 = abs[Math.floor(abs.length * 0.95)] || 6;
-    MARGIN_SCALE = Math.max(0.5, q95);
+    if (!isRegression) {
+      // 标尺量程按测试集决策值的 95 分位自适应，换模型后不用改代码
+      const abs = histData.margins.map(Math.abs).sort((a, b) => a - b);
+      const q95 = abs[Math.floor(abs.length * 0.95)] || 6;
+      MARGIN_SCALE = Math.max(0.5, q95);
+    }
     $("hist-empty").classList.add("hidden");
     $("hist-body").classList.remove("hidden");
     drawHist();
@@ -604,15 +629,18 @@ function drawHist() {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, cssW, cssH);
 
+  const reg = histData.task === "regression";
+  const margins = histData.margins;
   const padL = 14, padR = 14, padT = 24, padB = 24;
-  const lo = Math.min(...histData.margins, 0) - 0.4;
-  const hi = Math.max(...histData.margins, 0) + 0.4;
+  const lo = reg ? Math.min(...margins) - 0.2 : Math.min(...margins, 0) - 0.4;
+  const hi = reg ? Math.max(...margins) + 0.2 : Math.max(...margins, 0) + 0.4;
   const B = 36;
   const pos = new Array(B).fill(0), neg = new Array(B).fill(0);
-  for (let k = 0; k < histData.margins.length; k++) {
-    let b = Math.floor((histData.margins[k] - lo) / (hi - lo) * B);
+  for (let k = 0; k < margins.length; k++) {
+    let b = Math.floor((margins[k] - lo) / (hi - lo) * B);
     b = Math.max(0, Math.min(B - 1, b));
-    (histData.labels[k] === 1 ? pos : neg)[b]++;
+    if (reg) pos[b]++;
+    else (histData.labels[k] === 1 ? pos : neg)[b]++;
   }
   const maxC = Math.max(...pos, ...neg, 1);
   const base = cssH - padB;
@@ -621,6 +649,11 @@ function drawHist() {
 
   for (let b = 0; b < B; b++) {
     const bx = padL + b * bw;
+    if (reg) {
+      ctx.fillStyle = "rgba(79,70,229,.55)";
+      ctx.fillRect(bx + 0.5, base - h(pos[b]), Math.max(1, bw - 1), h(pos[b]));
+      continue;
+    }
     ctx.fillStyle = "rgba(225,29,72,.55)";
     ctx.fillRect(bx + 0.5, base - h(neg[b]), Math.max(1, bw - 1), h(neg[b]));
     ctx.fillStyle = "rgba(13,148,136,.55)";
@@ -630,11 +663,16 @@ function drawHist() {
   ctx.beginPath(); ctx.moveTo(padL, base + 0.5); ctx.lineTo(cssW - padR, base + 0.5); ctx.stroke();
 
   const xOf = (v) => padL + (v - lo) / (hi - lo) * (cssW - padL - padR);
-  ctx.strokeStyle = "#9ca3af"; ctx.setLineDash([4, 4]);
-  ctx.beginPath(); ctx.moveTo(xOf(0) + 0.5, padT - 8); ctx.lineTo(xOf(0) + 0.5, base); ctx.stroke();
-  ctx.setLineDash([]);
   ctx.fillStyle = "#24292f"; ctx.font = "12.5px sans-serif"; ctx.textAlign = "center";
-  ctx.fillText("0", xOf(0), base + 15);
+  if (reg) {
+    ctx.fillText(lo.toFixed(1), xOf(lo) + 8, base + 15);
+    ctx.fillText(hi.toFixed(1), xOf(hi) - 8, base + 15);
+  } else {
+    ctx.strokeStyle = "#9ca3af"; ctx.setLineDash([4, 4]);
+    ctx.beginPath(); ctx.moveTo(xOf(0) + 0.5, padT - 8); ctx.lineTo(xOf(0) + 0.5, base); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillText("0", xOf(0), base + 15);
+  }
 
   if (lastMargin !== null && lastMargin >= lo && lastMargin <= hi) {
     const mx = xOf(lastMargin);
@@ -644,7 +682,7 @@ function drawHist() {
     ctx.fillStyle = "#4f46e5"; ctx.fill();
     ctx.lineWidth = 1;
   }
-  histGeom = { lo, hi, B, padL, bw, pos, neg, cssW, cssH, padT, base };
+  histGeom = { lo, hi, B, padL, bw, pos, neg, reg, cssW, cssH, padT, base };
 }
 
 function onHistHover(e) {
@@ -656,7 +694,9 @@ function onHistHover(e) {
   const a = histGeom.lo + b / histGeom.B * (histGeom.hi - histGeom.lo);
   const c = histGeom.lo + (b + 1) / histGeom.B * (histGeom.hi - histGeom.lo);
   const tip = $("tooltip");
-  tip.textContent = fmt(a, 2) + " ~ " + fmt(c, 2) + " · 正 " + histGeom.pos[b] + " · 负 " + histGeom.neg[b];
+  tip.textContent = histGeom.reg
+    ? a.toFixed(2) + " ~ " + c.toFixed(2) + " · " + histGeom.pos[b] + " 条"
+    : fmt(a, 2) + " ~ " + fmt(c, 2) + " · 正 " + histGeom.pos[b] + " · 负 " + histGeom.neg[b];
   tip.style.left = e.clientX + "px";
   tip.style.top = e.clientY + "px";
   tip.classList.remove("hidden");
@@ -696,9 +736,26 @@ function drawScatter() {
   const py = (y) => cssH - pad - (y - minY) * sy;
   spaceScale = space.points.map((p, i) => [px(p[0]), py(p[1]), i]);
 
+  const reg = space.task === "regression";
+  let vmin = 0, vmax = 1;
+  if (reg) {
+    vmin = Math.min(...space.labels);
+    vmax = Math.max(...space.labels);
+  }
+  // 回归用蓝→红渐变表示标签高低；分类用两类配色
+  const colorFor = (v) => {
+    const t = Math.max(0, Math.min(1, (v - vmin) / (vmax - vmin || 1)));
+    const r = Math.round(37 + (225 - 37) * t);
+    const g = Math.round(99 + (29 - 99) * t);
+    const b = Math.round(235 + (72 - 235) * t);
+    return "rgba(" + r + "," + g + "," + b + ",.65)";
+  };
+
   for (let i = 0; i < space.points.length; i++) {
     if (i === lastNN) continue;
-    ctx.fillStyle = space.labels[i] === 1 ? "rgba(13,148,136,.65)" : "rgba(225,29,72,.65)";
+    ctx.fillStyle = reg
+      ? colorFor(space.labels[i])
+      : (space.labels[i] === 1 ? "rgba(13,148,136,.65)" : "rgba(225,29,72,.65)");
     ctx.beginPath();
     ctx.arc(px(space.points[i][0]), py(space.points[i][1]), 2.6, 0, Math.PI * 2);
     ctx.fill();
@@ -729,7 +786,10 @@ function scatterHover(e, isClick) {
   const tip = $("tooltip");
   if (best < 0) { tip.classList.add("hidden"); if (isClick) return; return; }
   if (isClick) { pickSample(best); return; }
-  tip.textContent = "样本 #" + best + " · " + shortLabel(modelInfo.labels[space.labels[best]]) + " · 点击预测";
+  const label = isRegression
+    ? "真实 " + Number(space.labels[best]).toFixed(2)
+    : shortLabel(modelInfo.labels[space.labels[best]]);
+  tip.textContent = "样本 #" + best + " · " + label + " · 点击预测";
   tip.style.left = e.clientX + "px";
   tip.style.top = e.clientY + "px";
   tip.classList.remove("hidden");
@@ -747,8 +807,10 @@ async function pickSample(i) {
       flash("该样本原文不可用，已直接用其向量预测");
     }
     renderResult({
+      task: s.task,
       label_id: s.label_id,
-      label: modelInfo.labels[s.label_id],
+      label: s.label,
+      value: s.value,
       margin: s.margin,
       dim: N_DIMS,
       norm: Math.sqrt(s.vector.reduce((acc, x) => acc + x * x, 0)),
