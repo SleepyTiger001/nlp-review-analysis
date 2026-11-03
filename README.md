@@ -1,7 +1,7 @@
 # 文本向量 + 浅层模型流水线（分类 / 回归）
 
 用 sentence-transformers 提取句向量，接一个浅层模型完成文本分类或数值回归。
-数据集、Embedding 模型、任务类型全部由 `config.yaml` 决定，仓库本身不绑定某个模型、数据集或任务。
+数据集、Embedding 模型、任务类型全部由 `configs/*.yaml` 决定，仓库本身不绑定某个模型、数据集或任务。
 
 适合：评论情感/主题分类、评分与满意度回归、短文本打分的课程作业与基线实验。
 
@@ -110,13 +110,13 @@ data:
 
 ### 4.3 回归任务
 
-复制 `configs/regression.yaml` 修改即可：
+`configs/regression.yaml` 是一个可用的回归配置（豆瓣长评 → 1-5 评分），把 `data.path` 换成自己的数据即可。数据不随仓库分发，运行前先放到 `data/` 下：
 
 ```yaml
 task: regression
 data:
   source: local
-  path: data/ratings.jsonl
+  path: data/niulai/clean.jsonl
   text_column: text
   label_column: score
 model:
@@ -181,6 +181,7 @@ embedding:
 | `model.name` | `linear_svc` / `logistic_regression` / `ridge` / `linear_svr` |
 | `model.param_grid` | 调参网格，留空用内置默认值 |
 | `model.scoring` | 调参指标，留空时分类用 `f1_macro`、回归用 `neg_root_mean_squared_error` |
+| `model.refit_full` | `true` 时评估后用 train+validation+test 全量重训交付模型（指标仍来自留出测试集） |
 | `runtime.device` | `auto` / `cuda` / `mps` / `cpu` |
 | `runtime.seed` | 划分与模型随机种子 |
 | `output.dir` | 产物目录，默认 `artifacts` |
@@ -203,7 +204,7 @@ python main.py train -c configs/regression.yaml   # 指定配置
 
 | 文件 | 内容 |
 | --- | --- |
-| `artifacts/model.joblib` | 分类/回归模型、embedding 模型名、维度、最佳参数、标签名、指标 |
+| `artifacts/model.joblib` | 分类/回归模型（`refit_full: true` 时为全量重训后的模型）、embedding 模型名、维度、最佳参数、标签名、指标 |
 | `artifacts/embeddings.npz` | 三个划分的向量与标签（带配置签名，配置变了自动重算） |
 | `artifacts/metrics.json` | 测试集指标、数据来源、划分规模、最佳参数 |
 | `artifacts/test_predictions.csv` | 测试集逐条预测（原文、真实值、预测值、decision function） |
@@ -219,10 +220,10 @@ python main.py train -c configs/regression.yaml   # 指定配置
 ├── data.py              # 数据集下载、读取、划分、标签编码
 ├── encoder.py           # embedding 模型下载与编码（含长文本切块）
 ├── modeling.py          # 模型注册、验证集调参、指标
-├── webapp.py            # 本地网页工作台（可选，分类任务）
-├── config.yaml          # 默认配置（ChnSentiCorp 分类示例）
+├── webapp.py            # 本地网页工作台（分类 / 回归）
 ├── configs/
-│   └── regression.yaml  # 回归任务模板
+│   ├── classification.yaml  # 分类（默认，ChnSentiCorp）
+│   └── regression.yaml      # 回归（豆瓣评分示例）
 ├── templates/index.html
 ├── data/                # 数据（不入库）
 ├── models/              # embedding 权重（不入库）

@@ -39,7 +39,7 @@ SEED = 42
 
 app = Flask(__name__)
 app.config.setdefault("DEVICE", "auto")
-app.config.setdefault("CONFIG_PATH", "config.yaml")
+app.config.setdefault("CONFIG_PATH", "configs/classification.yaml")
 
 _state_lock = threading.Lock()
 _space_lock = threading.Lock()
@@ -376,7 +376,7 @@ def api_space() -> Any:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="本地预测工作台（分类 / 回归）")
-    parser.add_argument("-c", "--config", default="config.yaml")
+    parser.add_argument("-c", "--config", default="configs/classification.yaml")
     parser.add_argument(
         "--device", choices=["auto", "cuda", "mps", "cpu"], default="auto"
     )

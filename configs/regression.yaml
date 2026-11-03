@@ -1,12 +1,12 @@
-# 回归任务模板：把数据换成自己的打分数据即可。
+# 回归任务：豆瓣长评 → 评分（1-5）
+# 数据集不入库：先把数据放到 data/niulai/clean.jsonl，或改成自己的路径与列名。
 # 用法：python main.py train -c configs/regression.yaml
 task: regression
 
 data:
   source: local
-  # 相对路径以仓库根目录为基准；csv / tsv / parquet 都支持
-  path: data/ratings.csv
-  text_column: review
+  path: data/niulai/clean.jsonl
+  text_column: text
   label_column: score
   # 数据里若有 train/validation/test 列，填列名；否则按 8:1:1 随机切分
   split_column: null
@@ -15,11 +15,15 @@ data:
 embedding:
   model: BAAI/bge-small-zh-v1.5
   batch_size: 32
+  # 影评偏长，按 380 字切块后取平均，避免只编码开头
+  chunk_chars: 380
 
 model:
   name: ridge
   param_grid:
     alpha: [0.1, 1.0, 10.0, 100.0]
+  # 评估后在全量数据上重训交付模型
+  refit_full: true
 
 runtime:
   device: auto

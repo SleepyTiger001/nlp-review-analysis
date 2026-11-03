@@ -7,9 +7,6 @@ models/*
 # 训练产物
 artifacts/
 
-# 本地实验配置（指向未上传的数据）
-configs/local.yaml
-
 # Python
 __pycache__/
 *.py[cod]

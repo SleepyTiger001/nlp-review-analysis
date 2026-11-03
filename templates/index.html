@@ -253,7 +253,7 @@
     </section>
 
     <section class="card c-result">
-      <h2>判定结果</h2>
+      <h2>预测结果</h2>
       <div id="result-empty" class="empty">输入文本，点击「预测」；或在散点图中点选样本</div>
       <div id="result" class="hidden" style="display:flex; flex-direction:column; flex:1; min-height:0;">
         <div class="verdict-row">
@@ -402,7 +402,7 @@ async function init() {
       modelInfo = await api("/api/model");
       isRegression = modelInfo.task === "regression";
       document.body.classList.toggle("regression", isRegression);
-      document.querySelector(".c-result h2").textContent = isRegression ? "预测结果" : "判定结果";
+      document.querySelector(".c-result h2").textContent = isRegression ? "评分" : "预测结果";
       const params = Object.entries(modelInfo.best_params || {})
         .map(([k, v]) => k + "=" + v).join(", ");
       $("badge-model").textContent =

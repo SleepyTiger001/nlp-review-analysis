@@ -25,7 +25,7 @@ from sklearn.metrics import classification_report
 from config import DEVICES, SPLITS, Config, choose_device, describe_device, load_config
 from data import load_dataset_bundle, match_column, prepare_dataset, read_table
 from encoder import encode_texts, load_encoder, resolve_embedding_model
-from modeling import decision_scores, evaluate, train_model
+from modeling import build_estimator, decision_scores, evaluate, train_model
 
 MODEL_FILE: str = "model.joblib"
 
@@ -79,7 +79,16 @@ def cmd_train(args: argparse.Namespace) -> None:
     y_pred = result.estimator.predict(X["test"])
     metrics = evaluate(cfg.task, y["test"], y_pred)
     _print_eval(cfg, bundle, y["test"], y_pred, metrics, result)
-    _save_artifacts(cfg, bundle, X, y, result, metrics, y_pred, args)
+
+    final_estimator = result.estimator
+    if cfg.model.refit_full:
+        final_estimator = _refit_full(cfg, result, X, y)
+        print(
+            "\n交付模型：按最佳参数在 train+validation+test 全量数据上重训"
+            "（上面的指标仍来自留出测试集）。"
+        )
+
+    _save_artifacts(cfg, bundle, X, y, result, metrics, y_pred, final_estimator, args)
 
 
 def cmd_predict(args: argparse.Namespace) -> None:
@@ -272,6 +281,23 @@ def _print_eval(
         print(f"Pearson {metrics['pearson']:.4f}｜Spearman {metrics['spearman']:.4f}")
 
 
+def _refit_full(
+    cfg: Config,
+    result: Any,
+    X: dict[str, np.ndarray],
+    y: dict[str, np.ndarray],
+) -> Any:
+    """用最佳参数在全部数据上重训，只作为交付模型，不参与指标计算。"""
+    estimator = build_estimator(cfg.task, cfg.model.name, cfg.runtime.seed)
+    estimator.set_params(**result.best_params)
+    splits = [split for split in SPLITS if split in X]
+    estimator.fit(
+        np.concatenate([X[split] for split in splits]),
+        np.concatenate([y[split] for split in splits]),
+    )
+    return estimator
+
+
 def _save_artifacts(
     cfg: Config,
     bundle: Any,
@@ -280,6 +306,7 @@ def _save_artifacts(
     result: Any,
     metrics: dict[str, Any],
     y_pred: np.ndarray,
+    final_estimator: Any,
     args: argparse.Namespace,
 ) -> None:
     out = cfg.artifact_dir
@@ -289,12 +316,13 @@ def _save_artifacts(
     joblib.dump(
         {
             "task": cfg.task,
-            "estimator": result.estimator,
+            "estimator": final_estimator,
             "embedding_model": cfg.embedding.model,
             "embedding_dim": embedding_dim,
             "chunk_chars": cfg.embedding.chunk_chars,
             "model_name": cfg.model.name,
             "best_params": result.best_params,
+            "refit_full": cfg.model.refit_full,
             "label_names": {int(k): v for k, v in (bundle.label_names or {}).items()},
             "metrics": metrics,
         },
@@ -314,6 +342,7 @@ def _save_artifacts(
             "location": bundle.location,
         },
         "splits": {k: len(v) for k, v in y.items()},
+        "refit_full": cfg.model.refit_full,
         "metrics": metrics,
     }
     (out / "metrics.json").write_text(
@@ -333,7 +362,7 @@ def _save_artifacts(
     predictions.to_csv(out / "test_predictions.csv", index=False, encoding="utf-8-sig")
 
     shutil.copyfile(Path(args.config), out / "config.yaml")
-    print(f"\n分类器：{out / MODEL_FILE}")
+    print(f"\n模型：{out / MODEL_FILE}")
     print(f"指标：{out / 'metrics.json'}")
     print(f"测试集预测：{out / 'test_predictions.csv'}")
 
@@ -392,7 +421,9 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     def common(p: argparse.ArgumentParser, with_device: bool = True) -> None:
-        p.add_argument("-c", "--config", default="config.yaml", help="配置文件")
+        p.add_argument(
+            "-c", "--config", default="configs/classification.yaml", help="配置文件"
+        )
         if with_device:
             p.add_argument(
                 "--device", choices=list(DEVICES), default=None, help="覆盖配置里的设备"

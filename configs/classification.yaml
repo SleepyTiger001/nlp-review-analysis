@@ -34,6 +34,8 @@ model:
     C: [0.01, 0.1, 1.0, 10.0]
   # 调参指标；留空则分类用 f1_macro，回归用 neg_root_mean_squared_error
   scoring: null
+  # 评估用留出的 test；true 表示评估后再用 train+validation+test 全量重训交付模型
+  refit_full: true
 
 runtime:
   # auto 依次尝试 cuda、mps、cpu

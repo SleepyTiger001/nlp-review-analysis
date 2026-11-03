@@ -50,6 +50,7 @@ class ModelConfig:
     name: str = "linear_svc"
     param_grid: dict[str, list[Any]] = field(default_factory=dict)
     scoring: str | None = None
+    refit_full: bool = False  # 评估后是否用 train+validation+test 全量重训交付模型
 
 
 @dataclass
@@ -127,7 +128,9 @@ def _build(cls: type, raw: Any, section: str) -> Any:
     return cls(**raw)
 
 
-def load_config(path: str | Path = "config.yaml", root: Path | None = None) -> Config:
+def load_config(
+    path: str | Path = "configs/classification.yaml", root: Path | None = None
+) -> Config:
     """读取 YAML 配置；root 为仓库根目录，默认当前工作目录。"""
     config_path = Path(path)
     if not config_path.exists():
