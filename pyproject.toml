@@ -21,7 +21,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-# webapp.py 的 Flask 路由返回 jsonify 结果，行宽交给格式化器处理。
+# webapp.py 的中文 docstring 与接口清单常有超长行，不做 E501 检查。
 "webapp.py" = ["E501"]
 
 [tool.ruff.format]
