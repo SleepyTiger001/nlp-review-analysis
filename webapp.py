@@ -13,7 +13,7 @@
     POST /api/predict   {"text": ...} 或 {"vector": [...]} → 类别、decision function、向量摘要
     POST /api/neighbors 输入同上 → 测试集中余弦最近的样本
     GET  /api/sample?i= 散点下标 → 该样本的向量、模型判定与原文
-    GET  /api/hist      测试集子样本的 decision function 分布
+    GET  /api/hist      测试集全量的 decision function 分布
     GET  /api/space     t-SNE 投影；首次计算几十秒，结果缓存到 artifacts/
 """
 
@@ -35,7 +35,6 @@ from config import choose_device, load_config
 from data import load_dataset_bundle
 from encoder import encode_texts, load_encoder
 
-SUBSAMPLE_N = 800  # 散点图从测试集随机抽样的样本数
 SEED = 42
 
 app = Flask(__name__)
@@ -48,7 +47,7 @@ _state: dict[str, Any] = {}
 
 
 def get_state() -> dict[str, Any]:
-    """惰性加载配置、分类器、编码器与测试集子样本（进程内只加载一次）。"""
+    """惰性加载配置、分类器、编码器与测试集全量向量（进程内只加载一次）。"""
     with _state_lock:
         if _state:
             return _state
@@ -67,25 +66,18 @@ def get_state() -> dict[str, Any]:
         device = choose_device(app.config["DEVICE"])
         encoder = load_encoder(cfg, device)
 
-        subsample = None
+        test_set = None
         embeddings_file = cfg.artifact_dir / "embeddings.npz"
         if embeddings_file.exists():
             data = np.load(embeddings_file)
-            X_test, y_test = data["X_test"], data["y_test"]
-            rng = np.random.default_rng(SEED)
-            idx = np.sort(
-                rng.choice(
-                    len(X_test), size=min(SUBSAMPLE_N, len(X_test)), replace=False
-                )
-            )
-            subsample = {"X": X_test[idx], "y": y_test[idx], "orig_idx": idx}
+            test_set = {"X": data["X_test"], "y": data["y_test"]}
 
         _state.update(
             cfg=cfg,
             trained=trained,
             encoder=encoder,
             device=device,
-            subsample=subsample,
+            test=test_set,
             texts=None,
             texts_failed=False,
         )
@@ -150,9 +142,7 @@ def api_model() -> Any:
                 "torch": torch.__version__,
             },
             "splits": splits,
-            "subsample_n": int(state["subsample"]["X"].shape[0])
-            if state["subsample"]
-            else 0,
+            "test_n": int(state["test"]["X"].shape[0]) if state["test"] else 0,
         }
     )
 
@@ -222,7 +212,7 @@ def api_neighbors() -> Any:
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
 
-    sub = state["subsample"]
+    sub = state["test"]
     if sub is None:
         return jsonify({"available": False, "reason": "缺少 artifacts/embeddings.npz"})
 
@@ -236,14 +226,13 @@ def api_neighbors() -> Any:
     items = []
     for pos in np.argsort(-sims)[:3]:
         label_id = int(sub["y"][pos])
-        original = int(sub["orig_idx"][pos])
         items.append(
             {
                 "scatter_index": int(pos),
                 "sim": round(float(sims[pos]), 4),
                 "label_id": label_id,
                 "label": labels.get(label_id, str(label_id)),
-                "text": (texts[original][:120] if texts else None),
+                "text": (texts[pos][:120] if texts else None),
             }
         )
     return jsonify(
@@ -258,7 +247,7 @@ def api_sample() -> Any:
         state = get_state()
     except RuntimeError as exc:
         return jsonify({"error": str(exc)}), 503
-    sub = state["subsample"]
+    sub = state["test"]
     if sub is None:
         return jsonify({"error": "缺少 artifacts/embeddings.npz"}), 503
 
@@ -270,7 +259,6 @@ def api_sample() -> Any:
     estimator = state["trained"]["estimator"]
     labels = {int(k): v for k, v in state["trained"]["label_names"].items()}
     texts = load_test_texts()
-    original = int(sub["orig_idx"][index])
     pred = int(estimator.predict(vector)[0])
     return jsonify(
         {
@@ -279,7 +267,7 @@ def api_sample() -> Any:
             "label": labels.get(pred, str(pred)),
             "margin": float(estimator.decision_function(vector)[0]),
             "true_label": int(sub["y"][index]),
-            "text": (texts[original][:120] if texts else None),
+            "text": (texts[index][:120] if texts else None),
             "vector": [round(float(x), 4) for x in vector[0]],
         }
     )
@@ -287,12 +275,12 @@ def api_sample() -> Any:
 
 @app.get("/api/hist")
 def api_hist() -> Any:
-    """测试集子样本的 decision function 分布（客户端分箱）。"""
+    """测试集全量的 decision function 分布（客户端分箱）。"""
     try:
         state = get_state()
     except RuntimeError as exc:
         return jsonify({"error": str(exc)}), 503
-    sub = state["subsample"]
+    sub = state["test"]
     if sub is None:
         return jsonify({"error": "缺少 artifacts/embeddings.npz"}), 503
 
@@ -312,7 +300,7 @@ def api_space() -> Any:
         state = get_state()
     except RuntimeError as exc:
         return jsonify({"error": str(exc)}), 503
-    sub = state["subsample"]
+    sub = state["test"]
     if sub is None:
         return jsonify({"error": "缺少 artifacts/embeddings.npz，无法绘制投影"}), 503
 
