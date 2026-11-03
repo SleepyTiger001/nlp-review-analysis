@@ -125,7 +125,7 @@ python webapp.py -c configs/classification.yaml         # 网页工作台（另�
 | 文件 | 内容 |
 | --- | --- |
 | `artifacts/model.joblib` | 模型（`refit_full: true` 时为全量重训版）、embedding 模型名与维度、最佳参数、标签名、指标 |
-| `artifacts/embeddings.npz` | 三个划分的向量与标签（带「配置 + 数据内容摘要」签名，配置或数据变了自动重算） |
+| `artifacts/embeddings.npz` | 三个划分的向量与标签（带「embedding 配置 + 数据内容摘要」签名，配置或数据变了自动重算） |
 | `artifacts/metrics.json` | 测试集指标、数据来源、划分规模、最佳参数 |
 | `artifacts/test_predictions.csv` | 测试集逐条预测（原文、真实值、预测值、decision function） |
 | `artifacts/config.yaml` | 训练时使用的配置副本，便于复现 |
@@ -137,14 +137,14 @@ python webapp.py -c configs/classification.yaml         # 网页工作台（另�
 分类显示类别与 decision function 标尺；多于两类的多分类自动降级为按「预测正确 / 错误」着色；
 回归显示预测评分，散点按真实标签高低着色。
 `refit_full: true` 时，工作台的判定来自全量重训后的交付模型（对测试集属 in-sample 口径），顶部指标徽章仍来自留出测试集。
-默认只监听 `127.0.0.1`，数据不出本机；用 `--host` 改绑时请自行评估暴露风险。
+默认只监听 `127.0.0.1`（可用 `--host` 改绑）。
 
 ## 10. 常见问题
 
 1. **cuda / MPS 报错**：cuda 提示「检测不到 GPU」说明装的是 CPU 版 torch，按官网命令重装；MPS 报错可先用 `--device cpu` 绕过。
 2. **显存不足**：调小 `embedding.batch_size`；长文本再调小 `embedding.chunk_chars`。
 3. **下载慢或超时**：设 `HF_ENDPOINT=https://hf-mirror.com`，或用 `hf download` 手动下载。
-4. **指标和之前对不上**：向量缓存按「配置 + 数据内容摘要」复用，改模型、改数据、改种子会自动重算；若 embedding 权重内容变了但仓库名没变，加 `--recompute`。
+4. **指标和之前对不上**：向量缓存按「embedding 配置 + 数据内容摘要」复用，改模型、改数据、改种子会自动重算；若 embedding 权重内容变了但仓库名没变，加 `--recompute`。
 5. **标签是字符串**：无需改代码，自动按字典序编码；用 `data.label_names` 指定显示名。
 
 ## 11. 开发与来源

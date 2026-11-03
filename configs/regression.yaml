@@ -8,8 +8,7 @@ data:
   path: data/niulai/clean.jsonl
   text_column: text
   label_column: score
-  # 数据里若有 train/validation/test 列，填列名（兼容 dev/val 等别名，三类需齐全）；
-  # 否则按 8:1:1 随机切分
+  # 数据里若有 train/validation/test 列，填列名；否则按 8:1:1 随机切分
   split_column: null
   max_samples: null
 

@@ -140,7 +140,7 @@ def cmd_predict(args: argparse.Namespace) -> None:
         texts,
         cfg.embedding.batch_size,
         " 待预测文本",
-        trained.get("chunk_chars"),
+        trained["chunk_chars"],
     )
     pred = trained["estimator"].predict(vectors)
     scores = decision_scores(trained["estimator"], vectors, pred)
@@ -176,7 +176,7 @@ def cmd_chat(args: argparse.Namespace) -> None:
             encoder,
             [text],
             cfg.embedding.batch_size,
-            chunk_chars=trained.get("chunk_chars"),
+            chunk_chars=trained["chunk_chars"],
         )
         pred = trained["estimator"].predict(vector)
         scores = decision_scores(trained["estimator"], vector, pred)
@@ -208,7 +208,7 @@ def _get_embeddings(
 
     if cache.exists() and not force:
         data = np.load(cache)
-        if "signature" in data and str(data["signature"]) == signature:
+        if str(data["signature"]) == signature:
             print(f"复用向量缓存：{cache}（加 --recompute 可强制重算）")
             X = {s: data[f"X_{s}"] for s in SPLITS if f"X_{s}" in data}
             y = {s: data[f"y_{s}"] for s in SPLITS if f"y_{s}" in data}
@@ -252,19 +252,14 @@ def _split_digest(bundle: Any, split: str) -> str:
 
 
 def _cache_signature(cfg: Config, bundle: Any) -> str:
-    """向量缓存签名：配置字段 + 每个划分的条数与内容摘要。"""
+    """向量缓存签名：embedding 配置 + 每个划分的文本与标签内容摘要。
+
+    X 由文本与 embedding 配置决定，y 由标签内容决定；内容一变摘要必然变，
+    其余配置字段（数据来源、列名、种子、采样数等）无需逐一比对。
+    """
     parts = [
-        cfg.task,
-        cfg.data.source,
-        str(cfg.data.name or cfg.data.path),
-        cfg.data.text_column,
-        cfg.data.label_column,
-        cfg.data.split_column or "-",
-        ";".join(f"{k}->{cfg.data.splits.get(k, k)}" for k in SPLITS),
-        str(cfg.runtime.seed),
         cfg.embedding.model,
         str(cfg.embedding.chunk_chars),
-        str(cfg.data.max_samples),
         *(
             f"{k}:{len(bundle.texts[k])}:{_split_digest(bundle, k)}"
             for k in sorted(bundle.texts)

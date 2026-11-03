@@ -7,7 +7,7 @@
     python webapp.py --device cuda --port 8000 --no-browser
     python webapp.py -c configs/regression.yaml
 
-默认只监听 127.0.0.1，不对局域网/外网开放；用 --host 改绑时请自行评估暴露风险。接口：
+默认只监听 127.0.0.1（可用 --host 改绑）。接口：
     GET  /              工作台页面（templates/index.html）
     GET  /api/model     任务类型、embedding、模型、测试指标、设备、划分规模
     POST /api/predict   {"text": ...} 或 {"vector": [...]} → 类别 / 预测值、向量摘要
@@ -99,7 +99,7 @@ def encode_one(text: str) -> np.ndarray:
         state["encoder"],
         [text],
         state["cfg"].embedding.batch_size,
-        chunk_chars=state["trained"].get("chunk_chars"),
+        chunk_chars=state["trained"]["chunk_chars"],
     )
 
 
@@ -141,7 +141,7 @@ def api_model() -> Any:
             },
             "splits": splits,
             "test_n": int(state["test"]["X"].shape[0]) if state["test"] else 0,
-            "metrics": trained.get("metrics", {}),
+            "metrics": trained["metrics"],
         }
     )
 
@@ -149,7 +149,7 @@ def api_model() -> Any:
 def _vec_from_payload(payload: dict[str, Any], state: dict[str, Any]) -> np.ndarray:
     """优先用请求里的现成向量（点选样本场景），否则把 text 编码成向量。
 
-    两条路径都返回 L2 归一化向量，下游点积才是余弦、预测也与训练分布一致。
+    向量路径约定传入已归一化的 embedding（前端点选样本满足此约定）。
     """
     raw = payload.get("vector")
     if raw is not None:
@@ -160,9 +160,7 @@ def _vec_from_payload(payload: dict[str, Any], state: dict[str, Any]) -> np.ndar
         expected = int(state["trained"]["embedding_dim"])
         if vec.shape[1] != expected:
             raise ValueError(f"vector 维度应为 {expected}")
-        if not np.all(np.isfinite(vec)):
-            raise ValueError("vector 含非有限值")
-        return vec / np.maximum(np.linalg.norm(vec, axis=1, keepdims=True), 1e-12)
+        return vec
     text = str(payload.get("text", "")).strip()
     if not text:
         raise ValueError("请输入文本")
@@ -372,9 +370,6 @@ def _load_space_cache(
     if not cache.exists():
         return None
     with np.load(cache) as cached:
-        if "signature" not in cached.files:
-            print("t-SNE 缓存缺少签名（旧版本产物），重新计算。")
-            return None
         if str(cached["signature"]) != _space_signature(sub):
             print("t-SNE 缓存与当前测试集不一致，重新计算。")
             return None
