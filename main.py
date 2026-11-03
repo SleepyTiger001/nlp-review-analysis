@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import shutil
 from pathlib import Path
@@ -22,12 +23,18 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import classification_report
 
-from config import DEVICES, SPLITS, Config, choose_device, describe_device, load_config
+from config import (
+    DEVICES,
+    MODEL_FILE,
+    SPLITS,
+    Config,
+    choose_device,
+    describe_device,
+    load_config,
+)
 from data import load_dataset_bundle, match_column, prepare_dataset, read_table
 from encoder import encode_texts, load_encoder, resolve_embedding_model
 from modeling import build_estimator, decision_scores, evaluate, train_model
-
-MODEL_FILE: str = "model.joblib"
 
 
 def _config(args: argparse.Namespace) -> Config:
@@ -39,6 +46,16 @@ def _config(args: argparse.Namespace) -> Config:
 
 def _device(args: argparse.Namespace, cfg: Config) -> str:
     return choose_device(args.device or cfg.runtime.device)
+
+
+def _align_embedding_model(cfg: Config, trained: dict[str, Any]) -> None:
+    """预测类命令一律按训练时的 embedding 编码，否则维度或语义对不上。"""
+    if cfg.embedding.model != trained["embedding_model"]:
+        print(
+            f"注意：配置里的 embedding 是 {cfg.embedding.model}，"
+            f"训练时是 {trained['embedding_model']}，按训练时的模型加载。"
+        )
+        cfg.embedding.model = trained["embedding_model"]
 
 
 def cmd_prepare(args: argparse.Namespace) -> None:
@@ -104,12 +121,7 @@ def cmd_predict(args: argparse.Namespace) -> None:
         )
 
     trained = joblib.load(model_path)
-    if cfg.embedding.model != trained["embedding_model"]:
-        print(
-            f"注意：配置里的 embedding 是 {cfg.embedding.model}，"
-            f"训练时是 {trained['embedding_model']}，按训练时的模型加载。"
-        )
-        cfg.embedding.model = trained["embedding_model"]
+    _align_embedding_model(cfg, trained)
 
     encoder = load_encoder(cfg, device)
     frame = pd.DataFrame()
@@ -149,8 +161,7 @@ def cmd_chat(args: argparse.Namespace) -> None:
         )
 
     trained = joblib.load(model_path)
-    if cfg.embedding.model != trained["embedding_model"]:
-        cfg.embedding.model = trained["embedding_model"]
+    _align_embedding_model(cfg, trained)
     encoder = load_encoder(cfg, device)
 
     print(f"\n{trained['task']} 交互预测，输入 q 退出。")
@@ -228,17 +239,36 @@ def _get_embeddings(
     return X, y
 
 
+def _split_digest(bundle: Any, split: str) -> str:
+    """单个划分的文本与标签内容摘要。
+
+    条数相同不代表数据相同：改 seed 重新切分、换 split_column、
+    同名文件内容更新，都只有内容摘要能发现。
+    """
+    digest = hashlib.sha256()
+    digest.update("\x00".join(bundle.texts[split]).encode("utf-8"))
+    digest.update(np.asarray(bundle.labels[split]).tobytes())
+    return digest.hexdigest()[:16]
+
+
 def _cache_signature(cfg: Config, bundle: Any) -> str:
+    """向量缓存签名：配置字段 + 每个划分的条数与内容摘要。"""
     parts = [
         cfg.task,
         cfg.data.source,
         str(cfg.data.name or cfg.data.path),
         cfg.data.text_column,
         cfg.data.label_column,
+        cfg.data.split_column or "-",
+        ";".join(f"{k}->{cfg.data.splits.get(k, k)}" for k in SPLITS),
+        str(cfg.runtime.seed),
         cfg.embedding.model,
         str(cfg.embedding.chunk_chars),
         str(cfg.data.max_samples),
-        *(f"{k}:{len(v)}" for k, v in sorted(bundle.texts.items())),
+        *(
+            f"{k}:{len(bundle.texts[k])}:{_split_digest(bundle, k)}"
+            for k in sorted(bundle.texts)
+        ),
     ]
     return ";".join(parts)
 
@@ -445,7 +475,7 @@ def build_parser() -> argparse.ArgumentParser:
     common(predict_parser)
     predict_parser.add_argument("--text", default=None, help="单条文本")
     predict_parser.add_argument(
-        "--file", type=Path, default=None, help="批量文件：csv/tsv/parquet"
+        "--file", type=Path, default=None, help="批量文件：csv/tsv/parquet/jsonl/json"
     )
     predict_parser.add_argument(
         "--out", type=Path, default=None, help="批量结果输出路径"

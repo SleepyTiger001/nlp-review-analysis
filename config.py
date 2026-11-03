@@ -17,6 +17,7 @@ Task = Literal["classification", "regression"]
 
 SPLITS: tuple[str, ...] = ("train", "validation", "test")
 DEVICES: tuple[str, ...] = ("auto", "cuda", "mps", "cpu")
+MODEL_FILE: str = "model.joblib"  # 训练产物文件名，main 与 webapp 共用
 
 
 @dataclass
@@ -25,12 +26,12 @@ class DataConfig:
 
     source: str = "huggingface"  # huggingface | local
     name: str | None = None  # source=huggingface：数据集仓库名
-    path: str | None = None  # source=local：csv/tsv/parquet 文件或目录
+    path: str | None = None  # source=local：csv/tsv/parquet/jsonl/json 文件或目录
     text_column: str = "text"
     label_column: str = "label"
-    split_column: str | None = None  # 单文件时用于切分的列
+    split_column: str | None = None  # 单文件切分列；三类划分值需各出现至少一次
     splits: dict[str, str] = field(default_factory=dict)  # 逻辑划分 -> 文件名前缀
-    max_samples: int | None = None  # 每个划分最多取多少条，调试用
+    max_samples: int | None = None  # 每个划分最多取前多少条，调试用
     label_names: list[str] | None = None  # 分类任务的类别显示名
 
 
@@ -90,7 +91,7 @@ class Config:
         if self.data.source == "huggingface" and not self.data.name:
             raise ValueError(
                 "data.source=huggingface 时必须填写 data.name，"
-                "例如 BAAI/bge-small-zh-v1.5"
+                "例如 lansinuote/ChnSentiCorp"
             )
         if self.data.source == "local" and not self.data.path:
             raise ValueError("data.source=local 时必须填写 data.path")

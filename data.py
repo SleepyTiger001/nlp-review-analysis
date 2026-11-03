@@ -5,7 +5,7 @@
     data/<数据集名>/...   Hugging Face 数据集快照，由 prepare 下载
     data/<任意文件>      自备数据，config 里用 data.path 指向
 
-支持的表格格式：csv / tsv / parquet / jsonl（一行一条记录）。
+支持的表格格式：csv / tsv / parquet / jsonl（一行一条记录）/ json（记录数组）。
 划分规则按优先级：
     1. 目录内存在 train / validation / test 文件
        （`train.csv` 或 `train-00000-of-00001.parquet` 都认）；
@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -73,7 +74,7 @@ def read_table(path: Path) -> pd.DataFrame:
     if suffix == ".json":
         return pd.read_json(path)
     raise ValueError(
-        f"不支持的表格格式：{path.name}（仅支持 csv / tsv / parquet / jsonl）"
+        f"不支持的表格格式：{path.name}（仅支持 csv / tsv / parquet / jsonl / json）"
     )
 
 
@@ -134,11 +135,23 @@ def _match_split(path: Path, prefix: str) -> bool:
     return path.stem == prefix or path.stem.startswith(f"{prefix}-")
 
 
+def _stratify_if_safe(
+    cfg: Config, df: pd.DataFrame, test_size: float
+) -> pd.Series | None:
+    """分类任务尽量分层；某类样本少到切出一侧分不到 1 条时放弃分层。"""
+    if cfg.task != "classification":
+        return None
+    counts = df["label"].astype(str).value_counts()
+    if len(counts) <= 1 or int(counts.min()) < math.ceil(1.0 / test_size):
+        return None
+    return df["label"].astype(str)
+
+
 def _frames_from_dir(cfg: Config, root: Path) -> dict[str, pd.DataFrame]:
     files = _table_files(root)
     if not files:
         raise FileNotFoundError(
-            f"{root} 下没有 csv/tsv/parquet 文件；"
+            f"{root} 下没有 csv/tsv/parquet/jsonl/json 文件；"
             "请先运行 python main.py prepare，或把数据放到该目录"
         )
 
@@ -166,7 +179,10 @@ def _frames_from_dir(cfg: Config, root: Path) -> dict[str, pd.DataFrame]:
     if "test" in found:
         print(f"未找到 validation，从 train 切出 10% 作为验证集：{root}")
         train_df, val_df = train_test_split(
-            train_df, test_size=0.1, random_state=cfg.runtime.seed
+            train_df,
+            test_size=0.1,
+            random_state=cfg.runtime.seed,
+            stratify=_stratify_if_safe(cfg, train_df, 0.1),
         )
         return {
             "train": train_df,
@@ -177,7 +193,10 @@ def _frames_from_dir(cfg: Config, root: Path) -> dict[str, pd.DataFrame]:
     if "validation" in found:
         print(f"未找到 test，从 train 切出 10% 作为测试集：{root}")
         train_df, test_df = train_test_split(
-            train_df, test_size=0.1, random_state=cfg.runtime.seed
+            train_df,
+            test_size=0.1,
+            random_state=cfg.runtime.seed,
+            stratify=_stratify_if_safe(cfg, train_df, 0.1),
         )
         return {
             "train": train_df,
@@ -211,22 +230,17 @@ def _frames_from_file(cfg: Config, path: Path) -> dict[str, pd.DataFrame]:
 
 
 def _random_split(cfg: Config, df: pd.DataFrame) -> dict[str, pd.DataFrame]:
-    stratify = None
-    if cfg.task == "classification":
-        counts = df["label"].value_counts()
-        if len(counts) > 1 and int(counts.min()) >= 3:
-            stratify = df["label"].astype(str)
-
     train_df, rest = train_test_split(
-        df, test_size=0.2, random_state=cfg.runtime.seed, stratify=stratify
+        df,
+        test_size=0.2,
+        random_state=cfg.runtime.seed,
+        stratify=_stratify_if_safe(cfg, df, 0.2),
     )
-    stratify_rest = None
-    if stratify is not None:
-        rest_counts = rest["label"].astype(str).value_counts()
-        if int(rest_counts.min()) >= 2:
-            stratify_rest = rest["label"].astype(str)
     val_df, test_df = train_test_split(
-        rest, test_size=0.5, random_state=cfg.runtime.seed, stratify=stratify_rest
+        rest,
+        test_size=0.5,
+        random_state=cfg.runtime.seed,
+        stratify=_stratify_if_safe(cfg, rest, 0.5),
     )
     return {"train": train_df, "validation": val_df, "test": test_df}
 
@@ -243,7 +257,11 @@ def _prepare_frame(cfg: Config, df: pd.DataFrame) -> pd.DataFrame:
         }
     )
     if cfg.task == "regression":
+        before = int(out["label"].isna().sum())
         out["label"] = pd.to_numeric(out["label"], errors="coerce")
+        dropped = int(out["label"].isna().sum()) - before
+        if dropped > 0:
+            print(f"回归任务：{dropped} 条标签无法解析为数值，已丢弃")
     out = out.dropna(subset=["label"])
     out = out[out["text"] != ""]
     if out.empty:

@@ -1,4 +1,4 @@
-"""本地网页工作台（可选，分类 / 回归）。
+"""本地网页工作台（分类 / 回归）。
 
 先决条件：python main.py train 已生成 artifacts/model.joblib。
 
@@ -7,7 +7,7 @@
     python webapp.py --device cuda --port 8000 --no-browser
     python webapp.py -c configs/regression.yaml
 
-只监听 127.0.0.1，不对局域网/外网开放。接口：
+默认只监听 127.0.0.1，不对局域网/外网开放；用 --host 改绑时请自行评估暴露风险。接口：
     GET  /              工作台页面（templates/index.html）
     GET  /api/model     任务类型、embedding、模型、测试指标、设备、划分规模
     POST /api/predict   {"text": ...} 或 {"vector": [...]} → 类别 / 预测值、向量摘要
@@ -20,10 +20,12 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import sys
 import threading
 import time
 import webbrowser
+from pathlib import Path
 from typing import Any
 
 import joblib
@@ -31,11 +33,10 @@ import numpy as np
 import torch
 from flask import Flask, jsonify, render_template, request
 
-from config import choose_device, load_config
+from config import DEVICES, MODEL_FILE, choose_device, load_config
 from data import load_dataset_bundle
 from encoder import encode_texts, load_encoder
-
-SEED = 42
+from modeling import decision_scores
 
 app = Flask(__name__)
 app.config.setdefault("DEVICE", "auto")
@@ -53,7 +54,7 @@ def get_state() -> dict[str, Any]:
             return _state
 
         cfg = load_config(app.config["CONFIG_PATH"])
-        model_file = cfg.artifact_dir / "model.joblib"
+        model_file = cfg.artifact_dir / MODEL_FILE
         if not model_file.exists():
             raise RuntimeError("没有找到训练产物，请先运行：python main.py train")
 
@@ -65,8 +66,8 @@ def get_state() -> dict[str, Any]:
         test_set = None
         embeddings_file = cfg.artifact_dir / "embeddings.npz"
         if embeddings_file.exists():
-            data = np.load(embeddings_file)
-            test_set = {"X": data["X_test"], "y": data["y_test"]}
+            with np.load(embeddings_file) as data:
+                test_set = {"X": data["X_test"], "y": data["y_test"]}
 
         _state.update(
             cfg=cfg,
@@ -118,12 +119,12 @@ def api_model() -> Any:
     splits = {}
     embeddings_file = state["cfg"].artifact_dir / "embeddings.npz"
     if embeddings_file.exists():
-        data = np.load(embeddings_file)
-        splits = {
-            k: int(data[f"y_{k}"].shape[0])
-            for k in ("train", "validation", "test")
-            if f"y_{k}" in data
-        }
+        with np.load(embeddings_file) as data:
+            splits = {
+                k: int(data[f"y_{k}"].shape[0])
+                for k in ("train", "validation", "test")
+                if f"y_{k}" in data
+            }
     return jsonify(
         {
             "task": trained["task"],
@@ -132,6 +133,7 @@ def api_model() -> Any:
             "classifier": type(trained["estimator"]).__name__,
             "best_params": trained["best_params"],
             "labels": {str(k): v for k, v in trained["label_names"].items()},
+            "n_classes": len(trained["label_names"]),
             "device": state["device"],
             "versions": {
                 "python": ".".join(map(str, sys.version_info[:3])),
@@ -145,7 +147,10 @@ def api_model() -> Any:
 
 
 def _vec_from_payload(payload: dict[str, Any], state: dict[str, Any]) -> np.ndarray:
-    """优先用请求里的现成向量（点选样本场景），否则把 text 编码成向量。"""
+    """优先用请求里的现成向量（点选样本场景），否则把 text 编码成向量。
+
+    两条路径都返回 L2 归一化向量，下游点积才是余弦、预测也与训练分布一致。
+    """
     raw = payload.get("vector")
     if raw is not None:
         try:
@@ -155,7 +160,9 @@ def _vec_from_payload(payload: dict[str, Any], state: dict[str, Any]) -> np.ndar
         expected = int(state["trained"]["embedding_dim"])
         if vec.shape[1] != expected:
             raise ValueError(f"vector 维度应为 {expected}")
-        return vec
+        if not np.all(np.isfinite(vec)):
+            raise ValueError("vector 含非有限值")
+        return vec / np.maximum(np.linalg.norm(vec, axis=1, keepdims=True), 1e-12)
     text = str(payload.get("text", "")).strip()
     if not text:
         raise ValueError("请输入文本")
@@ -179,15 +186,16 @@ def api_predict() -> Any:
     estimator = trained["estimator"]
     task = trained["task"]
     labels = {int(k): v for k, v in trained["label_names"].items()}
-    raw = estimator.predict(vec)[0]
+    pred = estimator.predict(vec)
+    scores = decision_scores(estimator, vec, pred)
     if task == "classification":
-        label_id: int | None = int(raw)
+        label_id = int(pred[0])
         label = labels.get(label_id, str(label_id))
-        margin = float(estimator.decision_function(vec)[0])
-        value: float | None = None
+        value = None
+        margin = float(scores[0]) if scores is not None else None
     else:
         label_id = None
-        value = float(raw)
+        value = float(pred[0])
         label = f"{value:.2f}"
         margin = value
 
@@ -238,9 +246,9 @@ def api_neighbors() -> Any:
     items = []
     for pos in np.argsort(-sims)[:3]:
         if task == "classification":
-            label_id: int | None = int(sub["y"][pos])
+            label_id = int(sub["y"][pos])
             label = labels.get(label_id, str(label_id))
-            value: float | None = None
+            value = None
         else:
             label_id = None
             value = float(sub["y"][pos])
@@ -281,19 +289,19 @@ def api_sample() -> Any:
     task = trained["task"]
     labels = {int(k): v for k, v in trained["label_names"].items()}
     texts = load_test_texts()
-    raw = estimator.predict(vector)[0]
+    pred = estimator.predict(vector)
+    scores = decision_scores(estimator, vector, pred)
     if task == "classification":
-        label_id: int | None = int(raw)
+        label_id = int(pred[0])
         label = labels.get(label_id, str(label_id))
-        margin = float(estimator.decision_function(vector)[0])
-        value: float | None = None
-        true = int(sub["y"][index])
+        value = None
+        margin = float(scores[0]) if scores is not None else None
     else:
         label_id = None
-        value = float(raw)
+        value = float(pred[0])
         label = f"{value:.2f}"
         margin = value
-        true = float(sub["y"][index])
+    true = int(sub["y"][index]) if task == "classification" else float(sub["y"][index])
     return jsonify(
         {
             "task": task,
@@ -309,6 +317,28 @@ def api_sample() -> Any:
     )
 
 
+def _test_outputs(state: dict[str, Any]) -> tuple[list[float], list[int] | None]:
+    """测试集全量输出，进程内缓存一次。
+
+    分类为「预测类的决策值」（多分类取预测类对应列），回归为预测值；
+    preds 仅分类任务有值，供前端按「预测正确 / 错误」着色。
+    """
+    if "margins" not in state:
+        sub = state["test"]
+        trained = state["trained"]
+        estimator = trained["estimator"]
+        pred = np.asarray(estimator.predict(sub["X"]))
+        if trained["task"] == "classification":
+            scores = decision_scores(estimator, sub["X"], pred)
+            margins = scores if scores is not None else pred.astype(float)
+            state["preds"] = [int(v) for v in pred]
+        else:
+            margins = pred.astype(float)
+            state["preds"] = None
+        state["margins"] = np.asarray(margins, dtype=float).tolist()
+    return state["margins"], state["preds"]
+
+
 @app.get("/api/hist")
 def api_hist() -> Any:
     """测试集全量的模型输出分布（分类为决策值，回归为预测值）。"""
@@ -321,17 +351,34 @@ def api_hist() -> Any:
         return jsonify({"error": "缺少 artifacts/embeddings.npz"}), 503
 
     trained = state["trained"]
-    task = trained["task"]
-    if "margins" not in state:
-        estimator = trained["estimator"]
-        outputs = (
-            estimator.decision_function(sub["X"])
-            if task == "classification"
-            else estimator.predict(sub["X"])
-        )
-        state["margins"] = np.asarray(outputs, dtype=float).tolist()
-    labels = [float(v) if task == "regression" else int(v) for v in sub["y"]]
-    return jsonify({"task": task, "margins": state["margins"], "labels": labels})
+    margins, preds = _test_outputs(state)
+    labels = [float(v) if trained["task"] == "regression" else int(v) for v in sub["y"]]
+    return jsonify(
+        {"task": trained["task"], "margins": margins, "labels": labels, "preds": preds}
+    )
+
+
+def _space_signature(sub: dict[str, np.ndarray]) -> str:
+    """t-SNE 缓存签名：测试集向量与标签的内容摘要，换模型或数据即失效。"""
+    digest = hashlib.sha256()
+    digest.update(sub["X"].tobytes())
+    digest.update(sub["y"].tobytes())
+    return digest.hexdigest()
+
+
+def _load_space_cache(
+    cache: Path, sub: dict[str, np.ndarray]
+) -> tuple[np.ndarray, np.ndarray] | None:
+    if not cache.exists():
+        return None
+    with np.load(cache) as cached:
+        if "signature" not in cached.files:
+            print("t-SNE 缓存缺少签名（旧版本产物），重新计算。")
+            return None
+        if str(cached["signature"]) != _space_signature(sub):
+            print("t-SNE 缓存与当前测试集不一致，重新计算。")
+            return None
+        return cached["xy"], cached["y"]
 
 
 @app.get("/api/space")
@@ -346,40 +393,50 @@ def api_space() -> Any:
 
     cache = state["cfg"].artifact_dir / "space_tsne.npz"
     task = state["trained"]["task"]
+    _, preds = _test_outputs(state)
     with _space_lock:
-        if cache.exists():
-            cached = np.load(cache)
-            if len(cached["y"]) == len(sub["y"]):
-                return jsonify(
-                    {
-                        "task": task,
-                        "points": cached["xy"].tolist(),
-                        "labels": cached["y"].tolist(),
-                    }
-                )
+        cached_payload = _load_space_cache(cache, sub)
+        if cached_payload is not None:
+            xy, labels = cached_payload
+            return jsonify(
+                {
+                    "task": task,
+                    "points": xy.tolist(),
+                    "labels": labels.tolist(),
+                    "preds": preds,
+                }
+            )
 
         from sklearn.decomposition import PCA
         from sklearn.manifold import TSNE
 
+        seed = state["cfg"].runtime.seed
         print(f"计算 t-SNE 投影（{len(sub['y'])} 个点，首次约需几十秒）…")
-        X50 = PCA(n_components=50, random_state=SEED).fit_transform(sub["X"])
+        X50 = PCA(n_components=50, random_state=seed).fit_transform(sub["X"])
         xy = (
-            TSNE(n_components=2, init="pca", perplexity=30, random_state=SEED)
+            TSNE(n_components=2, init="pca", perplexity=30, random_state=seed)
             .fit_transform(X50)
             .astype(np.float32)
         )
         cache.parent.mkdir(parents=True, exist_ok=True)
-        np.savez_compressed(cache, xy=xy, y=sub["y"])
+        np.savez_compressed(
+            cache, xy=xy, y=sub["y"], signature=np.asarray(_space_signature(sub))
+        )
         print("t-SNE 完成，已缓存。")
-    return jsonify({"task": task, "points": xy.tolist(), "labels": sub["y"].tolist()})
+    return jsonify(
+        {
+            "task": task,
+            "points": xy.tolist(),
+            "labels": sub["y"].tolist(),
+            "preds": preds,
+        }
+    )
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="本地预测工作台（分类 / 回归）")
     parser.add_argument("-c", "--config", default="configs/classification.yaml")
-    parser.add_argument(
-        "--device", choices=["auto", "cuda", "mps", "cpu"], default="auto"
-    )
+    parser.add_argument("--device", choices=list(DEVICES), default="auto")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument(
         "--port", type=int, default=7860

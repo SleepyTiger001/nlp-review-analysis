@@ -171,9 +171,12 @@
   .cdot.neg { background: var(--neg); }
   .cdot.neutral { background: #6366f1; }
   .verdict.score { color: #4338ca; background: #eef2ff; }
+  .verdict.neutral { color: #4338ca; background: #eef2ff; }
   .nl.neutral { background: #eef2ff; color: #4338ca; }
-  /* 回归任务的输出是连续值，隐藏二分类专用的标尺与堆叠图例 */
+  /* 回归任务的输出是连续值，隐藏二分类专用的标尺与堆叠图例；
+     多分类（>2 类）没有统一的正负方向，同样隐藏标尺 */
   body.regression .gauge, body.regression .gauge-labels { display: none; }
+  body.multiclass .gauge, body.multiclass .gauge-labels { display: none; }
   body.regression .c-hist .legend span:nth-child(-n+2) { display: none; }
   body.regression .dot.pos { background: #e11d48; }
   body.regression .dot.neg { background: #2563eb; }
@@ -345,9 +348,10 @@ function pickExample() {
 
 let modelInfo = null;
 let isRegression = false;
+let isMulticlass = false;   // 超过两类的分类任务：界面按「预测正确/错误」降级展示
 let modelReady = Promise.resolve(false);   // 页面刚打开、模型仍在加载时，预测会等它就绪
-let space = null;          // {points, labels}
-let histData = null;       // {margins, labels}
+let space = null;          // {points, labels, preds}
+let histData = null;       // {margins, labels, preds}
 let histGeom = null;       // 直方图几何信息，用于悬停
 let lastVector = null;
 let lastNN = -1;           // 最近邻/点选样本在散点数组中的下标
@@ -413,7 +417,9 @@ async function init() {
     try {
       modelInfo = await api("/api/model");
       isRegression = modelInfo.task === "regression";
+      isMulticlass = !isRegression && (modelInfo.n_classes || 0) > 2;
       document.body.classList.toggle("regression", isRegression);
+      document.body.classList.toggle("multiclass", isMulticlass);
       $("app-title").textContent = isRegression ? "文本回归工作台" : "文本分类工作台";
       document.title = $("app-title").textContent;
       $("hist-title").textContent = isRegression ? "预测值分布 · 测试集" : "决策值分布 · 测试集";
@@ -435,8 +441,8 @@ async function init() {
       $("badge-device").classList.remove("hidden");
       $("vec-dim").textContent = modelInfo.embedding_dim;
       N_DIMS = modelInfo.embedding_dim;
-      const labelPos = isRegression ? "高分" : (modelInfo.labels[1] || "类别 1");
-      const labelNeg = isRegression ? "低分" : (modelInfo.labels[0] || "类别 0");
+      const labelPos = isRegression ? "高分" : (isMulticlass ? "预测正确" : (modelInfo.labels[1] || "类别 1"));
+      const labelNeg = isRegression ? "低分" : (isMulticlass ? "预测错误" : (modelInfo.labels[0] || "类别 0"));
       document.querySelectorAll(".label-pos").forEach((el) => { el.textContent = labelPos; });
       document.querySelectorAll(".label-neg").forEach((el) => { el.textContent = labelNeg; });
       $("gauge-pos").textContent = labelPos + " →";
@@ -502,9 +508,9 @@ function renderResult(r, textForHistory) {
   const reg = r.task === "regression";
   const v = $("verdict");
   v.textContent = reg ? Number(r.value).toFixed(2) : shortLabel(r.label);
-  v.className = "verdict " + (reg ? "score" : (r.label_id === 1 ? "pos" : "neg"));
+  v.className = "verdict " + (reg ? "score" : (isMulticlass ? "neutral" : (r.label_id === 1 ? "pos" : "neg")));
 
-  if (!reg) {
+  if (!reg && !isMulticlass) {
     const pct = 50 + 50 * Math.max(-1, Math.min(1, r.margin / MARGIN_SCALE));
     $("gauge-marker").style.left = pct + "%";
   }
@@ -542,7 +548,7 @@ function pushHistory(text, labelId, reg) {
     const c = document.createElement("span");
     c.className = "chip";
     c.innerHTML = "<i class='cdot'></i><span class='txt'></span>";
-    c.querySelector("i").classList.add(h.reg ? "neutral" : (h.labelId === 1 ? "pos" : "neg"));
+    c.querySelector("i").classList.add(h.reg || isMulticlass ? "neutral" : (h.labelId === 1 ? "pos" : "neg"));
     c.querySelector(".txt").textContent = h.text;
     c.title = h.text;
     c.addEventListener("click", () => {
@@ -611,7 +617,7 @@ async function loadNeighbors(body) {
       const sim = document.createElement("span");
       sim.className = "sim"; sim.textContent = it.sim.toFixed(3);
       const tag = document.createElement("span");
-      tag.className = "nl " + (isRegression ? "neutral" : (it.label_id === 1 ? "pos" : "neg"));
+      tag.className = "nl " + ((isRegression || isMulticlass) ? "neutral" : (it.label_id === 1 ? "pos" : "neg"));
       tag.textContent = shortLabel(it.label);
       const tx = document.createElement("span");
       tx.className = "ntext";
@@ -627,7 +633,7 @@ async function loadNeighbors(body) {
   } catch (e) { /* 附加功能 */ }
 }
 
-/* ---------- 决策值分布直方图 ---------- */
+/* ---------- 模型输出分布直方图（分类决策值 / 回归预测值） ---------- */
 async function loadHist() {
   try {
     histData = await api("/api/hist");
@@ -664,10 +670,12 @@ function drawHist() {
   const hi = reg ? Math.max(...margins) + 0.2 : Math.max(...margins, 0) + 0.4;
   const B = 36;
   const pos = new Array(B).fill(0), neg = new Array(B).fill(0);
+  const preds = histData.preds;
   for (let k = 0; k < margins.length; k++) {
     let b = Math.floor((margins[k] - lo) / (hi - lo) * B);
     b = Math.max(0, Math.min(B - 1, b));
     if (reg) pos[b]++;
+    else if (isMulticlass) (preds && preds[k] === histData.labels[k] ? pos : neg)[b]++;
     else (histData.labels[k] === 1 ? pos : neg)[b]++;
   }
   const maxC = Math.max(...pos, ...neg, 1);
@@ -710,7 +718,7 @@ function drawHist() {
     ctx.fillStyle = "#4f46e5"; ctx.fill();
     ctx.lineWidth = 1;
   }
-  histGeom = { lo, hi, B, padL, bw, pos, neg, reg, cssW, cssH, padT, base };
+  histGeom = { lo, hi, B, padL, bw, pos, neg, reg, multi: isMulticlass, cssW, cssH, padT, base };
 }
 
 function onHistHover(e) {
@@ -724,7 +732,9 @@ function onHistHover(e) {
   const tip = $("tooltip");
   tip.textContent = histGeom.reg
     ? a.toFixed(2) + " ~ " + c.toFixed(2) + " · " + histGeom.pos[b] + " 条"
-    : fmt(a, 2) + " ~ " + fmt(c, 2) + " · 正 " + histGeom.pos[b] + " · 负 " + histGeom.neg[b];
+    : histGeom.multi
+      ? fmt(a, 2) + " ~ " + fmt(c, 2) + " · 对 " + histGeom.pos[b] + " · 错 " + histGeom.neg[b]
+      : fmt(a, 2) + " ~ " + fmt(c, 2) + " · 正 " + histGeom.pos[b] + " · 负 " + histGeom.neg[b];
   tip.style.left = e.clientX + "px";
   tip.style.top = e.clientY + "px";
   tip.classList.remove("hidden");
@@ -770,7 +780,7 @@ function drawScatter() {
     vmin = Math.min(...space.labels);
     vmax = Math.max(...space.labels);
   }
-  // 回归用蓝→红渐变表示标签高低；分类用两类配色
+  // 回归用蓝→红渐变表示标签高低；多分类按预测对错着色；二分类用两类配色
   const colorFor = (v) => {
     const t = Math.max(0, Math.min(1, (v - vmin) / (vmax - vmin || 1)));
     const r = Math.round(37 + (225 - 37) * t);
@@ -781,9 +791,16 @@ function drawScatter() {
 
   for (let i = 0; i < space.points.length; i++) {
     if (i === lastNN) continue;
-    ctx.fillStyle = reg
-      ? colorFor(space.labels[i])
-      : (space.labels[i] === 1 ? "rgba(13,148,136,.65)" : "rgba(225,29,72,.65)");
+    if (reg) {
+      ctx.fillStyle = colorFor(space.labels[i]);
+    } else if (isMulticlass) {
+      // 多分类按「预测是否正确」着色：正确 = 青，错误 = 红
+      ctx.fillStyle = space.preds && space.preds[i] === space.labels[i]
+        ? "rgba(13,148,136,.65)"
+        : "rgba(225,29,72,.65)";
+    } else {
+      ctx.fillStyle = space.labels[i] === 1 ? "rgba(13,148,136,.65)" : "rgba(225,29,72,.65)";
+    }
     ctx.beginPath();
     ctx.arc(px(space.points[i][0]), py(space.points[i][1]), 2.6, 0, Math.PI * 2);
     ctx.fill();
@@ -793,7 +810,6 @@ function drawScatter() {
     ctx.beginPath(); ctx.arc(nx, ny, 6.5, 0, Math.PI * 2);
     ctx.fillStyle = "#fff"; ctx.fill();
     ctx.lineWidth = 2.5; ctx.strokeStyle = "#4f46e5"; ctx.stroke();
-    window.__nnPx = [nx, ny];   // 测试用：高亮点的画布坐标
   }
 }
 
