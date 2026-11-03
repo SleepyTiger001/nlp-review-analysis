@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>文本分类工作台</title>
+<title>文本分析工作台</title>
 <style>
   :root {
     --bg: #f6f4ef;
@@ -227,7 +227,7 @@
 <header class="top">
   <div class="brand">
     <div class="logo">文</div>
-    <h1>文本分类工作台</h1>
+    <h1 id="app-title">文本分析工作台</h1>
   </div>
   <div class="badges">
     <span class="badge" id="badge-model">…</span>
@@ -285,7 +285,7 @@
   <div class="row-bottom">
     <section class="card c-hist">
       <div class="space-head">
-        <h2>决策值分布 · 测试集</h2>
+        <h2 id="hist-title">决策值分布 · 测试集</h2>
         <div class="legend">
           <span><i class="dot pos"></i><span class="label-pos">类别 1</span></span>
           <span><i class="dot neg"></i><span class="label-neg">类别 0</span></span>
@@ -323,13 +323,25 @@
 const $ = (id) => document.getElementById(id);
 let MARGIN_SCALE = 6;
 let N_DIMS = 512;
-const EXAMPLES = [
+const EXAMPLES_CLASSIFICATION = [
   "这家酒店位置很好，服务也很周到。",
   "物流很快，包装完好，下次还会回购。",
   "质量太差了，用了一次就坏了，非常失望。",
   "客服态度冷漠，拖了一个星期也没解决问题。",
   "中规中矩，没什么惊喜，也没踩坑。"
 ];
+const EXAMPLES_REGRESSION = [
+  "故事松散，表演用力过猛，看完只觉得浪费时间。",
+  "节奏紧凑，结尾收得漂亮，值得二刷。",
+  "中规中矩，没什么惊喜，也没踩坑。",
+  "全片靠煽情撑场面，人物动机站不住脚。",
+  "镜头和配乐都很克制，情绪一点点堆起来。"
+];
+
+function pickExample() {
+  const pool = isRegression ? EXAMPLES_REGRESSION : EXAMPLES_CLASSIFICATION;
+  return pool[Math.floor(Math.random() * pool.length)];
+}
 
 let modelInfo = null;
 let isRegression = false;
@@ -374,7 +386,7 @@ async function init() {
   });
   $("btn-predict").addEventListener("click", predict);
   $("btn-example").addEventListener("click", () => {
-    $("text").value = EXAMPLES[Math.floor(Math.random() * EXAMPLES.length)];
+    $("text").value = pickExample();
     $("text").dispatchEvent(new Event("input"));
     predict();
   });
@@ -402,7 +414,14 @@ async function init() {
       modelInfo = await api("/api/model");
       isRegression = modelInfo.task === "regression";
       document.body.classList.toggle("regression", isRegression);
+      $("app-title").textContent = isRegression ? "文本回归工作台" : "文本分类工作台";
+      document.title = $("app-title").textContent;
+      $("hist-title").textContent = isRegression ? "预测值分布 · 测试集" : "决策值分布 · 测试集";
       document.querySelector(".c-result h2").textContent = isRegression ? "评分" : "预测结果";
+      $("btn-example").textContent = isRegression ? "来个影评" : "来个例子";
+      $("text").placeholder = isRegression
+        ? "例：故事松散，表演用力过猛，看完只觉得浪费时间。"
+        : "例：这家酒店位置很好，服务也很周到。";
       const params = Object.entries(modelInfo.best_params || {})
         .map(([k, v]) => k + "=" + v).join(", ");
       $("badge-model").textContent =
@@ -428,7 +447,7 @@ async function init() {
       }
       await loadHist();
       loadSpace();
-      $("text").value = EXAMPLES[Math.floor(Math.random() * EXAMPLES.length)];
+      $("text").value = pickExample();
       $("text").dispatchEvent(new Event("input"));
       predict();
       return true;
@@ -492,7 +511,10 @@ function renderResult(r, textForHistory) {
 
   $("facts").innerHTML = "";
   const facts = reg
-    ? [["预测评分", Number(r.value).toFixed(2)], ["L2 范数", r.norm.toFixed(4)]]
+    ? [
+        ["真实评分", r.true_value == null ? "—" : Number(r.true_value).toFixed(2)],
+        ["L2 范数", r.norm.toFixed(4)],
+      ]
     : [["决策值", fmt(r.margin)], ["L2 范数", r.norm.toFixed(4)]];
   for (const [k, val] of facts) {
     const d = document.createElement("div");
@@ -506,6 +528,12 @@ function renderResult(r, textForHistory) {
 }
 
 function pushHistory(text, labelId, reg) {
+  // 同一句连续预测只保留一条，避免历史里堆重复项
+  if (history.length && history[0].text === text) {
+    history[0].labelId = labelId;
+    history[0].reg = reg;
+    return;
+  }
   history.unshift({ text, labelId, reg });
   if (history.length > 6) history.pop();
   const box = $("history");
@@ -811,6 +839,7 @@ async function pickSample(i) {
       label_id: s.label_id,
       label: s.label,
       value: s.value,
+      true_value: s.true_label,
       margin: s.margin,
       dim: N_DIMS,
       norm: Math.sqrt(s.vector.reduce((acc, x) => acc + x * x, 0)),
