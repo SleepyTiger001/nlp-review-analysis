@@ -1,0 +1,44 @@
+# 任务类型：classification（分类）或 regression（回归）
+task: classification
+
+data:
+  # huggingface：按仓库名下载到 data/<数据集名>/，例如 data/ChnSentiCorp/
+  # local：读取本地 csv/tsv/parquet，path 可以是单个文件，也可以是目录
+  source: huggingface
+  name: lansinuote/ChnSentiCorp
+  path: null
+  text_column: text
+  label_column: label
+  # 单文件切分时按该列取值（train/validation/test，兼容 dev/val）；三划分文件齐全时留空
+  split_column: null
+  splits:
+    train: train
+    validation: validation
+    test: test
+  # 每个划分最多取多少条，调试用；null 表示全量
+  max_samples: null
+  # 分类任务的类别显示名，顺序对应标签 0、1、2…；回归任务忽略
+  label_names: ["负向", "正向"]
+
+embedding:
+  # 仓库名（自动下载到 models/）或本地目录
+  model: BAAI/bge-small-zh-v1.5
+  batch_size: 32
+
+model:
+  # classification: linear_svc | logistic_regression
+  # regression:     ridge | linear_svr
+  name: linear_svc
+  # 留空则使用内置默认网格
+  param_grid:
+    C: [0.01, 0.1, 1.0, 10.0]
+  # 调参指标；留空则分类用 f1_macro，回归用 neg_root_mean_squared_error
+  scoring: null
+
+runtime:
+  # auto 依次尝试 cuda、mps、cpu
+  device: auto
+  seed: 42
+
+output:
+  dir: artifacts

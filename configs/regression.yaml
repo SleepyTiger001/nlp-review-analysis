@@ -1,0 +1,30 @@
+# 回归任务模板：把数据换成自己的打分数据即可。
+# 用法：python main.py train -c configs/regression.yaml
+task: regression
+
+data:
+  source: local
+  # 相对路径以仓库根目录为基准；csv / tsv / parquet 都支持
+  path: data/ratings.csv
+  text_column: review
+  label_column: score
+  # 数据里若有 train/validation/test 列，填列名；否则按 8:1:1 随机切分
+  split_column: null
+  max_samples: null
+
+embedding:
+  model: BAAI/bge-small-zh-v1.5
+  batch_size: 32
+
+model:
+  name: ridge
+  param_grid:
+    alpha: [0.1, 1.0, 10.0, 100.0]
+
+runtime:
+  device: auto
+  seed: 42
+
+output:
+  # 与分类任务分开存放，避免互相覆盖
+  dir: artifacts/regression

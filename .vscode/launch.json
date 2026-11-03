@@ -1,0 +1,39 @@
+{
+  // 解释器由 VSCode 选择：请选中 conda 的 torch-env 环境
+  // （Cmd+Shift+P → Python: Select Interpreter → torch-env）
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "训练（auto：cuda → mps → cpu）",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/main.py",
+      "args": ["train"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "env": { "PYTHONUNBUFFERED": "1" },
+      "justMyCode": false
+    },
+    {
+      // input() 需要键盘输入，必须用 integratedTerminal
+      "name": "交互预测：main.py chat",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/main.py",
+      "args": ["chat"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "网页工作台：webapp.py",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/webapp.py",
+      "args": ["--no-browser"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    }
+  ]
+}

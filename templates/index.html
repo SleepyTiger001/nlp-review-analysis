@@ -1,0 +1,768 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>文本分类工作台</title>
+<style>
+  :root {
+    --bg: #f6f4ef;
+    --card: #ffffff;
+    --border: #e7e2d8;
+    --ink: #24292f;
+    --muted: #24292f;
+    --accent: #4f46e5;
+    --pos: #0d9488;
+    --neg: #e11d48;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { -webkit-font-smoothing: antialiased; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    font-size: 14.5px;
+    color: var(--ink);
+    height: 100vh; display: flex; flex-direction: column; overflow: hidden;
+    background:
+      radial-gradient(1100px 520px at 85% -10%, #eef2ff 0%, rgba(238,242,255,0) 60%),
+      radial-gradient(900px 460px at -10% 110%, #f0fdfa 0%, rgba(240,253,250,0) 55%),
+      var(--bg);
+  }
+  @media (max-width: 1099px), (max-height: 779px) {
+    body { height: auto; overflow: auto; }
+    main { display: flex !important; flex-direction: column; }
+    .row-top, .row-bottom { display: flex !important; flex-direction: column; }
+    .plot-wrap { height: 300px; flex: none; }
+    .c-result { overflow: visible; }
+  }
+
+  header.top {
+    padding: 12px 22px 10px; display: flex; justify-content: space-between;
+    align-items: center; gap: 12px; flex-wrap: wrap; flex-shrink: 0;
+  }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .logo {
+    width: 40px; height: 40px; border-radius: 11px; flex-shrink: 0;
+    background: linear-gradient(135deg, #4f46e5, #0d9488);
+    color: #fff; display: flex; align-items: center; justify-content: center;
+    font-family: "Songti SC", "STSong", "Noto Serif SC", serif;
+    font-size: 20px; font-weight: 700;
+    box-shadow: 0 4px 12px rgba(79,70,229,.25);
+  }
+  h1 {
+    font-family: "Songti SC", "STSong", "Noto Serif SC", serif;
+    font-size: 21px; font-weight: 700; letter-spacing: .4px;
+  }
+  .badges { display: flex; gap: 8px; flex-wrap: wrap; }
+  .badge {
+    background: #fff; border: 1px solid var(--border); border-radius: 999px;
+    padding: 5px 13px; font-size: 13px; color: #4b5563;
+    box-shadow: 0 1px 2px rgba(0,0,0,.03);
+  }
+  .badge.warn { color: #b45309; border-color: #fcd34d; background: #fffbeb; }
+
+  main {
+    flex: 1; min-height: 0; padding: 0 22px 16px;
+    display: grid; grid-template-rows: minmax(0, 1.02fr) minmax(180px, 0.98fr); gap: 13px;
+  }
+  .row-top, .row-bottom { display: grid; gap: 13px; min-height: 0; }
+  .row-top { grid-template-columns: minmax(310px, 380px) minmax(400px, 1.15fr) minmax(320px, 0.9fr); }
+  .row-bottom { grid-template-columns: 1fr 1fr; }
+
+  .card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 15px;
+    padding: 16px 18px; min-height: 0;
+    box-shadow: 0 1px 3px rgba(31,35,40,.05), 0 10px 28px -20px rgba(31,35,40,.28);
+  }
+  .c-input, .c-result, .c-vector, .c-hist, .c-space { display: flex; flex-direction: column; }
+  .c-result, .c-vector { overflow: hidden; }
+  h2 { font-size: 15.5px; font-weight: 700; color: #111827; margin-bottom: 11px; flex-shrink: 0; }
+
+  textarea {
+    width: 100%; flex: 1; min-height: 64px; resize: none;
+    border: 1px solid var(--border); border-radius: 12px;
+    padding: 12px 14px; font: inherit; font-size: 15.5px; line-height: 1.65;
+    background: #fbfaf7; transition: border-color .15s, box-shadow .15s;
+  }
+  textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(79,70,229,.12); }
+  .row { display: flex; margin-top: 6px; font-size: 13.5px; color: var(--ink); flex-shrink: 0; }
+  .actions { display: flex; gap: 10px; margin-top: 12px; flex-shrink: 0; }
+  .actions .btn { flex: 1; }
+  .btn {
+    border: 0; border-radius: 10px; padding: 10px 20px;
+    font: inherit; font-size: 15px; font-weight: 600; cursor: pointer;
+    transition: transform .12s, box-shadow .12s, opacity .12s;
+  }
+  .btn.primary { background: linear-gradient(135deg, #4f46e5, #4338ca); color: #fff; box-shadow: 0 4px 12px rgba(79,70,229,.28); }
+  .btn.primary:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(79,70,229,.32); }
+  .btn.ghost { background: #fff; border: 1px solid var(--border); color: #374151; }
+  .btn.ghost:hover:not(:disabled) { border-color: #c9c3b6; background: #faf9f6; }
+  .btn:disabled { opacity: .55; cursor: not-allowed; }
+
+  .empty {
+    flex: 1; border: 1.5px dashed #ddd7ca; border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--ink); font-size: 15px; background: #fbfaf8; margin-top: 10px;
+  }
+  .hidden { display: none !important; }
+
+  .verdict-row { display: flex; align-items: stretch; gap: 12px; }
+  .verdict {
+    display: inline-flex; align-items: center; font-size: 23px; font-weight: 800;
+    padding: 6px 22px; border-radius: 999px; animation: pop .25s ease; flex-shrink: 0;
+  }
+  .verdict.pos { color: #0f766e; background: #ccfbf1; }
+  .verdict.neg { color: #be123c; background: #ffe4e6; }
+  @keyframes pop { from { transform: scale(.85); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  .facts { flex: 1; display: flex; gap: 9px; min-width: 0; }
+  .fact {
+    flex: 1; background: #f8f7f3; border: 1px solid var(--border); border-radius: 10px;
+    padding: 6px 10px; text-align: center; display: flex; flex-direction: column; justify-content: center;
+  }
+  .fact b { font-size: 17px; font-variant-numeric: tabular-nums; }
+  .fact span { font-size: 13px; color: var(--ink); }
+
+  .gauge {
+    position: relative; height: 12px; border-radius: 999px; margin: 16px 0 6px;
+    background: linear-gradient(90deg, rgba(225,29,72,.30), rgba(233,231,224,.85) 50%, rgba(13,148,136,.30));
+    flex-shrink: 0;
+  }
+  .gauge-zero { position: absolute; left: 50%; top: -4px; bottom: -4px; width: 1.5px; background: #9ca3af; }
+  .gauge-marker {
+    position: absolute; top: 50%; width: 18px; height: 18px; border-radius: 50%;
+    background: #fff; border: 3px solid var(--accent);
+    transform: translate(-50%, -50%);
+    box-shadow: 0 1px 4px rgba(0,0,0,.22);
+    transition: left .5s cubic-bezier(.22,1,.36,1);
+  }
+  .gauge-labels { display: flex; justify-content: space-between; font-size: 13px; color: var(--ink); }
+
+  .neighbors { margin-top: 14px; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .neighbors h3 { font-size: 15px; font-weight: 700; color: var(--ink); margin-bottom: 9px; flex-shrink: 0; }
+  .neighbors ul { list-style: none; display: flex; flex-direction: column; gap: 8px; flex: 1; min-height: 0; }
+  .neighbors li {
+    flex: 1; min-height: 0; display: flex; gap: 11px; align-items: center;
+    background: #f8f7f3; border: 1px solid var(--border); border-radius: 11px;
+    padding: 6px 14px; cursor: pointer; transition: border-color .12s;
+  }
+  .neighbors li:hover { border-color: var(--accent); }
+  .sim { color: var(--accent); font-weight: 700; font-size: 14px; font-variant-numeric: tabular-nums; flex-shrink: 0; }
+  .nl { flex-shrink: 0; font-size: 13px; border-radius: 999px; padding: 2px 9px; font-weight: 600; }
+  .nl.pos { background: #ccfbf1; color: #0f766e; }
+  .nl.neg { background: #ffe4e6; color: #be123c; }
+  .ntext {
+    color: var(--ink); font-size: 14px; line-height: 1.5; min-width: 0;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+
+  .history {
+    flex: 1; min-height: 0; margin-top: 12px; overflow: hidden;
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .chip {
+    flex-shrink: 0; display: flex; align-items: center;
+    font-size: 13.5px; border: 1px solid var(--border); background: #fbfaf7;
+    border-radius: 9px; padding: 5px 11px; cursor: pointer; color: var(--ink);
+    transition: border-color .12s, color .12s;
+  }
+  .chip:hover { border-color: var(--accent); color: var(--accent); }
+  .chip .txt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cdot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 7px; flex-shrink: 0; }
+  .cdot.pos { background: var(--pos); }
+  .cdot.neg { background: var(--neg); }
+
+  .hm-wrap { flex: 1; min-height: 0; position: relative; margin-top: 4px; }
+  #heatmap { position: absolute; inset: 0; width: 100%; height: 100%; }
+  #top-dims { list-style: none; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 11px; flex-shrink: 0; }
+  #top-dims li {
+    background: #f8f7f3; border: 1px solid var(--border); border-radius: 9px;
+    padding: 7px 6px; display: flex; justify-content: center; align-items: baseline; gap: 6px;
+    white-space: nowrap; min-width: 0; overflow: hidden;
+  }
+  #top-dims li .idx { font-size: 12.5px; color: var(--ink); font-variant-numeric: tabular-nums; }
+  #top-dims li .val { font-size: 13.5px; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+  .plot-wrap {
+    flex: 1; min-height: 0; position: relative; margin-top: 10px;
+    border: 1px solid var(--border); border-radius: 12px; background: #fcfbf8; overflow: hidden;
+  }
+  .plot-wrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; }
+  .dot.pos { background: var(--pos); }
+  .dot.neg { background: var(--neg); }
+  .dot.nn { background: #fff; border: 2px solid var(--accent); }
+  .dot.cur { background: var(--accent); border-radius: 2px; width: 12px; height: 4px; }
+
+  .space-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; flex-shrink: 0; }
+  .space-head h2 { margin-bottom: 0; }
+  .legend {
+    display: flex; gap: 12px; align-items: center; flex-shrink: 0;
+    font-size: 13.5px; color: var(--ink); margin-left: auto; margin-right: 2px;
+  }
+
+  .tooltip {
+    position: fixed; pointer-events: none; z-index: 50;
+    background: #111827; color: #f9fafb; font-size: 13px;
+    padding: 5px 10px; border-radius: 7px; transform: translate(-50%, -135%);
+    box-shadow: 0 4px 12px rgba(0,0,0,.25); white-space: nowrap;
+  }
+  #toast {
+    position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%);
+    background: #111827; color: #f9fafb; font-size: 13.5px;
+    padding: 10px 18px; border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.3);
+    opacity: 0; transition: opacity .25s; pointer-events: none; z-index: 60;
+  }
+  #toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="brand">
+    <div class="logo">文</div>
+    <h1>文本分类工作台</h1>
+  </div>
+  <div class="badges">
+    <span class="badge" id="badge-model">…</span>
+    <span class="badge hidden" id="badge-device"></span>
+    <span class="badge hidden" id="badge-env"></span>
+    <span class="badge hidden" id="badge-latency"></span>
+  </div>
+</header>
+
+<main>
+  <div class="row-top">
+    <section class="card c-input">
+      <h2>输入中文评论</h2>
+      <textarea id="text" placeholder="例：这家酒店位置很好，服务也很周到。"></textarea>
+      <div class="row"><span id="charcount">0 字</span></div>
+      <div class="actions">
+        <button id="btn-predict" class="btn primary">预测</button>
+        <button id="btn-example" class="btn ghost">来个例子</button>
+        <button id="btn-clear" class="btn ghost">清空</button>
+      </div>
+      <div id="history" class="history"></div>
+    </section>
+
+    <section class="card c-result">
+      <h2>判定结果</h2>
+      <div id="result-empty" class="empty">输入文本，点击「预测」；或在散点图中点选样本</div>
+      <div id="result" class="hidden" style="display:flex; flex-direction:column; flex:1; min-height:0;">
+        <div class="verdict-row">
+          <span class="verdict" id="verdict">—</span>
+          <div class="facts" id="facts"></div>
+        </div>
+        <div class="gauge">
+          <div class="gauge-zero"></div>
+          <div class="gauge-marker" id="gauge-marker" style="left:50%"></div>
+        </div>
+        <div class="gauge-labels"><span id="gauge-neg">← 类别 0</span><span>decision function · 非概率</span><span id="gauge-pos">类别 1 →</span></div>
+        <div id="neighbors" class="neighbors hidden">
+          <h3>最近邻样本</h3>
+          <ul id="neighbor-list"></ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="card c-vector">
+      <h2>句向量 · <span id="vec-dim">512</span> 维</h2>
+      <div id="vector-empty" class="empty">预测后显示热力图</div>
+      <div id="vector-info" class="hidden" style="display:flex; flex-direction:column; flex:1; min-height:0;">
+        <div class="hm-wrap"><canvas id="heatmap"></canvas></div>
+        <ul id="top-dims"></ul>
+      </div>
+    </section>
+  </div>
+
+  <div class="row-bottom">
+    <section class="card c-hist">
+      <div class="space-head">
+        <h2>决策值分布 · 测试集</h2>
+        <div class="legend">
+          <span><i class="dot pos"></i><span class="label-pos">类别 1</span></span>
+          <span><i class="dot neg"></i><span class="label-neg">类别 0</span></span>
+          <span><i class="dot cur"></i>当前预测</span>
+        </div>
+      </div>
+      <div id="hist-empty" class="empty">加载中…</div>
+      <div id="hist-body" class="plot-wrap hidden">
+        <canvas id="hist"></canvas>
+      </div>
+    </section>
+
+    <section class="card c-space">
+      <div class="space-head">
+        <h2>测试集向量空间 · t-SNE</h2>
+        <div class="legend">
+          <span><i class="dot pos"></i><span class="label-pos">类别 1</span></span>
+          <span><i class="dot neg"></i><span class="label-neg">类别 0</span></span>
+          <span><i class="dot nn"></i>最近邻</span>
+        </div>
+      </div>
+      <div id="space-empty" class="empty">加载中…</div>
+      <div id="space-body" class="plot-wrap hidden">
+        <canvas id="scatter"></canvas>
+      </div>
+    </section>
+  </div>
+</main>
+
+<div id="tooltip" class="tooltip hidden"></div>
+<div id="toast"></div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+let MARGIN_SCALE = 6;
+let N_DIMS = 512;
+const EXAMPLES = [
+  "这家酒店位置很好，服务也很周到。",
+  "物流很快，包装完好，下次还会回购。",
+  "质量太差了，用了一次就坏了，非常失望。",
+  "客服态度冷漠，拖了一个星期也没解决问题。",
+  "中规中矩，没什么惊喜，也没踩坑。"
+];
+
+let modelInfo = null;
+let modelReady = Promise.resolve(false);   // 页面刚打开、模型仍在加载时，预测会等它就绪
+let space = null;          // {points, labels}
+let histData = null;       // {margins, labels}
+let histGeom = null;       // 直方图几何信息，用于悬停
+let lastVector = null;
+let lastNN = -1;           // 最近邻/点选样本在散点数组中的下标
+let lastMargin = null;
+let spaceScale = null;
+const history = [];
+const NEIGHBOR_N = 3;
+
+async function api(path, body) {
+  const opts = body === undefined
+    ? {}
+    : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
+  const res = await fetch(path, opts);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || "HTTP " + res.status);
+  return data;
+}
+let toastTimer = null;
+function flash(msg) {
+  const t = $("toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove("show"), 3500);
+}
+const shortLabel = (label) => (label || "").split("（")[0];
+const fmt = (x, n = 4) => (x >= 0 ? "+" : "") + x.toFixed(n);
+
+/* ---------- 初始化 ---------- */
+async function init() {
+  $("text").addEventListener("input", () => {
+    $("charcount").textContent = $("text").value.length + " 字";
+  });
+  $("text").addEventListener("keydown", (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); predict(); }
+  });
+  $("btn-predict").addEventListener("click", predict);
+  $("btn-example").addEventListener("click", () => {
+    $("text").value = EXAMPLES[Math.floor(Math.random() * EXAMPLES.length)];
+    $("text").dispatchEvent(new Event("input"));
+    predict();
+  });
+  $("btn-clear").addEventListener("click", () => {
+    $("text").value = "";
+    $("text").dispatchEvent(new Event("input"));
+    $("text").focus();
+  });
+  const redraw = () => { if (lastVector) drawHeatmap(lastVector); if (space) drawScatter(); drawHist(); };
+  window.addEventListener("resize", redraw);
+  // 监听绘图容器自身：卡片内内容变化（如标签换行）会压缩容器，必须重绘，否则画布被拉伸变形
+  const ro = new ResizeObserver(redraw);
+  ro.observe(document.body);
+  ro.observe(document.querySelector(".hm-wrap"));
+  ro.observe($("hist-body"));
+  ro.observe($("space-body"));
+  $("scatter").addEventListener("mousemove", (e) => scatterHover(e, false));
+  $("scatter").addEventListener("click", (e) => scatterHover(e, true));
+  $("scatter").addEventListener("mouseleave", () => $("tooltip").classList.add("hidden"));
+  $("hist").addEventListener("mousemove", onHistHover);
+  $("hist").addEventListener("mouseleave", () => $("tooltip").classList.add("hidden"));
+
+  modelReady = (async () => {
+    try {
+      modelInfo = await api("/api/model");
+      const params = Object.entries(modelInfo.best_params || {})
+        .map(([k, v]) => k + "=" + v).join(", ");
+      $("badge-model").textContent =
+        modelInfo.embedding_model + " · " + modelInfo.classifier + (params ? " (" + params + ")" : "");
+      $("badge-device").textContent = "设备：" + modelInfo.device;
+      $("badge-device").classList.remove("hidden");
+      $("vec-dim").textContent = modelInfo.embedding_dim;
+      N_DIMS = modelInfo.embedding_dim;
+      const labelPos = modelInfo.labels[1] || "类别 1";
+      const labelNeg = modelInfo.labels[0] || "类别 0";
+      document.querySelectorAll(".label-pos").forEach((el) => { el.textContent = labelPos; });
+      document.querySelectorAll(".label-neg").forEach((el) => { el.textContent = labelNeg; });
+      $("gauge-pos").textContent = labelPos + " →";
+      $("gauge-neg").textContent = "← " + labelNeg;
+      if (modelInfo.versions) {
+        $("badge-env").textContent = "Python " + modelInfo.versions.python + " · torch " + modelInfo.versions.torch;
+        $("badge-env").classList.remove("hidden");
+      }
+      await loadHist();
+      loadSpace();
+      $("text").value = EXAMPLES[Math.floor(Math.random() * EXAMPLES.length)];
+      $("text").dispatchEvent(new Event("input"));
+      predict();
+      return true;
+    } catch (e) {
+      $("badge-model").textContent = "模型未就绪";
+      $("badge-model").classList.add("warn");
+      $("btn-predict").disabled = true;
+      $("hist-empty").textContent = "不可用";
+      flash(e.message);
+      return false;
+    }
+  })();
+}
+
+/* ---------- 预测（文本或向量） ---------- */
+async function predict() {
+  const text = $("text").value.trim();
+  if (!text) { flash("请输入文本"); return; }
+  if (!modelInfo) {
+    flash("模型加载中，请稍候…");
+    if (!await modelReady) return;
+  }
+  await runPredict({ text }, text);
+}
+
+async function runPredict(body, textForHistory) {
+  const btn = $("btn-predict");
+  btn.disabled = true; btn.textContent = "计算中…";
+  try {
+    const r = await api("/api/predict", body);
+    lastMargin = r.margin;
+    lastVector = r.vector;
+    if (r.timing) {
+      $("badge-latency").textContent = "上次预测 " + r.timing.total_ms + " ms（编码 " + r.timing.encode_ms + " ms）";
+      $("badge-latency").classList.remove("hidden");
+    }
+    renderResult(r, textForHistory);
+    drawHeatmap(r.vector);
+    loadNeighbors(body);
+    drawHist();
+  } catch (e) {
+    flash(e.message);
+  } finally {
+    btn.disabled = false; btn.textContent = "预测";
+  }
+}
+
+function renderResult(r, textForHistory) {
+  $("result-empty").classList.add("hidden");
+  $("result").classList.remove("hidden");
+
+  const v = $("verdict");
+  v.textContent = shortLabel(r.label);
+  v.className = "verdict " + (r.label_id === 1 ? "pos" : "neg");
+
+  const pct = 50 + 50 * Math.max(-1, Math.min(1, r.margin / MARGIN_SCALE));
+  $("gauge-marker").style.left = pct + "%";
+
+  $("facts").innerHTML = "";
+  const facts = [["决策值", fmt(r.margin)], ["维度", r.dim], ["L2 范数", r.norm.toFixed(4)]];
+  for (const [k, val] of facts) {
+    const d = document.createElement("div");
+    d.className = "fact";
+    d.innerHTML = "<b></b><span></span>";
+    d.querySelector("b").textContent = val;
+    d.querySelector("span").textContent = k;
+    $("facts").appendChild(d);
+  }
+  if (textForHistory !== undefined) pushHistory(textForHistory, r.label_id);
+}
+
+function pushHistory(text, labelId) {
+  history.unshift({ text, labelId });
+  if (history.length > 6) history.pop();
+  const box = $("history");
+  box.innerHTML = "";
+  for (const h of history) {
+    const c = document.createElement("span");
+    c.className = "chip";
+    c.innerHTML = "<i class='cdot'></i><span class='txt'></span>";
+    c.querySelector("i").classList.add(h.labelId === 1 ? "pos" : "neg");
+    c.querySelector(".txt").textContent = h.text;
+    c.title = h.text;
+    c.addEventListener("click", () => {
+      $("text").value = h.text;
+      $("text").dispatchEvent(new Event("input"));
+      predict();
+    });
+    box.appendChild(c);
+  }
+}
+
+/* ---------- 向量热力图（按容器长宽比自适应铺满） ---------- */
+function drawHeatmap(vec) {
+  lastVector = vec;
+  $("vector-empty").classList.add("hidden");
+  $("vector-info").classList.remove("hidden");
+
+  const wrap = document.querySelector(".hm-wrap");
+  const cssW = wrap.clientWidth, cssH = wrap.clientHeight;
+  if (cssW < 10 || cssH < 10) return;
+  const canvas = $("heatmap");
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.round(cssW * dpr);
+  canvas.height = Math.round(cssH * dpr);
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  const cols = Math.max(8, Math.round(Math.sqrt(N_DIMS * cssW / cssH)));
+  const rows = Math.ceil(N_DIMS / cols);
+  const cell = Math.max(6, Math.floor(Math.min(cssW / cols, cssH / rows)));  // 整数像素，保证正方形
+  const offX = (cssW - cell * cols) / 2, offY = (cssH - cell * rows) / 2;
+
+  const maxAbs = Math.max(...vec.map(Math.abs), 1e-6);
+  for (let i = 0; i < vec.length; i++) {
+    const x = offX + (i % cols) * cell, y = offY + Math.floor(i / cols) * cell;
+    const t = Math.abs(vec[i]) / maxAbs;
+    ctx.fillStyle = vec[i] >= 0
+      ? "rgba(239,68,68," + (0.08 + 0.92 * t).toFixed(3) + ")"
+      : "rgba(59,130,246," + (0.08 + 0.92 * t).toFixed(3) + ")";
+    ctx.fillRect(x + 0.5, y + 0.5, cell - 1, cell - 1);
+  }
+
+  const order = vec.map((v, i) => [Math.abs(v), i]).sort((a, b) => b[0] - a[0]).slice(0, 6);
+  $("top-dims").innerHTML = "";
+  for (const [, i] of order) {
+    const li = document.createElement("li");
+    li.innerHTML = "<span class='idx'></span><span class='val'></span>";
+    li.querySelector(".idx").textContent = "第 " + String(i).padStart(3, "0") + " 维";
+    li.querySelector(".val").textContent = fmt(vec[i]);
+    li.querySelector(".val").style.color = vec[i] >= 0 ? "#b91c1c" : "#1d4ed8";
+    $("top-dims").appendChild(li);
+  }
+}
+
+/* ---------- 最近邻 ---------- */
+async function loadNeighbors(body) {
+  try {
+    const r = await api("/api/neighbors", body);
+    if (!r.available) return;
+    $("neighbors").classList.remove("hidden");
+    const ul = $("neighbor-list");
+    ul.innerHTML = "";
+    if (body && body.exclude === undefined) lastNN = r.items[0].scatter_index;
+    for (const it of r.items.slice(0, NEIGHBOR_N)) {
+      const li = document.createElement("li");
+      const sim = document.createElement("span");
+      sim.className = "sim"; sim.textContent = it.sim.toFixed(3);
+      const tag = document.createElement("span");
+      tag.className = "nl " + (it.label_id === 1 ? "pos" : "neg");
+      tag.textContent = shortLabel(it.label);
+      const tx = document.createElement("span");
+      tx.className = "ntext";
+      tx.textContent = it.text || "（原文不可用）";
+      li.append(sim, tag, tx);
+      li.addEventListener("click", () => {
+        lastNN = it.scatter_index;
+        if (space) drawScatter();
+      });
+      ul.appendChild(li);
+    }
+    if (space) drawScatter();
+  } catch (e) { /* 附加功能 */ }
+}
+
+/* ---------- 决策值分布直方图 ---------- */
+async function loadHist() {
+  try {
+    histData = await api("/api/hist");
+    // 标尺量程按测试集决策值的 95 分位自适应，换模型后不用改代码
+    const abs = histData.margins.map(Math.abs).sort((a, b) => a - b);
+    const q95 = abs[Math.floor(abs.length * 0.95)] || 6;
+    MARGIN_SCALE = Math.max(0.5, q95);
+    $("hist-empty").classList.add("hidden");
+    $("hist-body").classList.remove("hidden");
+    drawHist();
+  } catch (e) {
+    $("hist-empty").textContent = "不可用";
+  }
+}
+
+function drawHist() {
+  if (!histData) return;
+  const canvas = $("hist"), wrap = canvas.parentElement;
+  const cssW = wrap.clientWidth, cssH = wrap.clientHeight;
+  if (cssW < 10 || cssH < 10) return;
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.round(cssW * dpr);
+  canvas.height = Math.round(cssH * dpr);
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cssW, cssH);
+
+  const padL = 14, padR = 14, padT = 24, padB = 24;
+  const lo = Math.min(...histData.margins, 0) - 0.4;
+  const hi = Math.max(...histData.margins, 0) + 0.4;
+  const B = 36;
+  const pos = new Array(B).fill(0), neg = new Array(B).fill(0);
+  for (let k = 0; k < histData.margins.length; k++) {
+    let b = Math.floor((histData.margins[k] - lo) / (hi - lo) * B);
+    b = Math.max(0, Math.min(B - 1, b));
+    (histData.labels[k] === 1 ? pos : neg)[b]++;
+  }
+  const maxC = Math.max(...pos, ...neg, 1);
+  const base = cssH - padB;
+  const bw = (cssW - padL - padR) / B;
+  const h = (c) => (cssH - padT - padB) * c / maxC;
+
+  for (let b = 0; b < B; b++) {
+    const bx = padL + b * bw;
+    ctx.fillStyle = "rgba(225,29,72,.55)";
+    ctx.fillRect(bx + 0.5, base - h(neg[b]), Math.max(1, bw - 1), h(neg[b]));
+    ctx.fillStyle = "rgba(13,148,136,.55)";
+    ctx.fillRect(bx + 0.5, base - h(pos[b]), Math.max(1, bw - 1), h(pos[b]));
+  }
+  ctx.strokeStyle = "#d6d0c4";
+  ctx.beginPath(); ctx.moveTo(padL, base + 0.5); ctx.lineTo(cssW - padR, base + 0.5); ctx.stroke();
+
+  const xOf = (v) => padL + (v - lo) / (hi - lo) * (cssW - padL - padR);
+  ctx.strokeStyle = "#9ca3af"; ctx.setLineDash([4, 4]);
+  ctx.beginPath(); ctx.moveTo(xOf(0) + 0.5, padT - 8); ctx.lineTo(xOf(0) + 0.5, base); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = "#24292f"; ctx.font = "12.5px sans-serif"; ctx.textAlign = "center";
+  ctx.fillText("0", xOf(0), base + 15);
+
+  if (lastMargin !== null && lastMargin >= lo && lastMargin <= hi) {
+    const mx = xOf(lastMargin);
+    ctx.strokeStyle = "#4f46e5"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(mx, padT - 12); ctx.lineTo(mx, base); ctx.stroke();
+    ctx.beginPath(); ctx.arc(mx, padT - 12, 4, 0, Math.PI * 2);
+    ctx.fillStyle = "#4f46e5"; ctx.fill();
+    ctx.lineWidth = 1;
+  }
+  histGeom = { lo, hi, B, padL, bw, pos, neg, cssW, cssH, padT, base };
+}
+
+function onHistHover(e) {
+  if (!histGeom) return;
+  const rect = e.target.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  let b = Math.floor((mx - histGeom.padL) / histGeom.bw);
+  if (b < 0 || b >= histGeom.B) { $("tooltip").classList.add("hidden"); return; }
+  const a = histGeom.lo + b / histGeom.B * (histGeom.hi - histGeom.lo);
+  const c = histGeom.lo + (b + 1) / histGeom.B * (histGeom.hi - histGeom.lo);
+  const tip = $("tooltip");
+  tip.textContent = fmt(a, 2) + " ~ " + fmt(c, 2) + " · 正 " + histGeom.pos[b] + " · 负 " + histGeom.neg[b];
+  tip.style.left = e.clientX + "px";
+  tip.style.top = e.clientY + "px";
+  tip.classList.remove("hidden");
+}
+
+/* ---------- t-SNE 散点（悬停查看，点选即预测） ---------- */
+async function loadSpace() {
+  try {
+    space = await api("/api/space");
+    $("space-empty").classList.add("hidden");
+    $("space-body").classList.remove("hidden");
+    drawScatter();
+  } catch (e) {
+    flash(e.message);
+  }
+}
+
+function drawScatter() {
+  const canvas = $("scatter");
+  const wrap = canvas.parentElement;
+  const cssW = wrap.clientWidth, cssH = wrap.clientHeight;
+  if (cssW < 10 || cssH < 10) return;
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.round(cssW * dpr);
+  canvas.height = Math.round(cssH * dpr);
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cssW, cssH);
+
+  const xs = space.points.map(p => p[0]), ys = space.points.map(p => p[1]);
+  const minX = Math.min(...xs), maxX = Math.max(...xs);
+  const minY = Math.min(...ys), maxY = Math.max(...ys);
+  const pad = 20;
+  const sx = (cssW - pad * 2) / (maxX - minX || 1);
+  const sy = (cssH - pad * 2) / (maxY - minY || 1);
+  const px = (x) => pad + (x - minX) * sx;
+  const py = (y) => cssH - pad - (y - minY) * sy;
+  spaceScale = space.points.map((p, i) => [px(p[0]), py(p[1]), i]);
+
+  for (let i = 0; i < space.points.length; i++) {
+    if (i === lastNN) continue;
+    ctx.fillStyle = space.labels[i] === 1 ? "rgba(13,148,136,.65)" : "rgba(225,29,72,.65)";
+    ctx.beginPath();
+    ctx.arc(px(space.points[i][0]), py(space.points[i][1]), 2.6, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  if (lastNN >= 0 && lastNN < space.points.length) {
+    const nx = px(space.points[lastNN][0]), ny = py(space.points[lastNN][1]);
+    ctx.beginPath(); ctx.arc(nx, ny, 6.5, 0, Math.PI * 2);
+    ctx.fillStyle = "#fff"; ctx.fill();
+    ctx.lineWidth = 2.5; ctx.strokeStyle = "#4f46e5"; ctx.stroke();
+    window.__nnPx = [nx, ny];   // 测试用：高亮点的画布坐标
+  }
+}
+
+function nearestPoint(e) {
+  const rect = e.target.getBoundingClientRect();
+  const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+  let best = -1, bestD = 11 * 11;
+  for (const [x, y, i] of spaceScale) {
+    const d = (x - mx) * (x - mx) + (y - my) * (y - my);
+    if (d < bestD) { bestD = d; best = i; }
+  }
+  return { best, rect };
+}
+
+function scatterHover(e, isClick) {
+  if (!spaceScale) return;
+  const { best } = nearestPoint(e);
+  const tip = $("tooltip");
+  if (best < 0) { tip.classList.add("hidden"); if (isClick) return; return; }
+  if (isClick) { pickSample(best); return; }
+  tip.textContent = "样本 #" + best + " · " + shortLabel(modelInfo.labels[space.labels[best]]) + " · 点击预测";
+  tip.style.left = e.clientX + "px";
+  tip.style.top = e.clientY + "px";
+  tip.classList.remove("hidden");
+}
+
+async function pickSample(i) {
+  try {
+    const s = await api("/api/sample?i=" + i);
+    lastNN = i;
+    lastMargin = s.margin;
+    if (s.text) {
+      $("text").value = s.text;
+      $("text").dispatchEvent(new Event("input"));
+    } else {
+      flash("该样本原文不可用，已直接用其向量预测");
+    }
+    renderResult({
+      label_id: s.label_id,
+      label: modelInfo.labels[s.label_id],
+      margin: s.margin,
+      dim: N_DIMS,
+      norm: Math.sqrt(s.vector.reduce((acc, x) => acc + x * x, 0)),
+    }, s.text || ("测试集样本 #" + s.i));
+    drawHeatmap(s.vector);
+    loadNeighbors({ vector: s.vector, exclude: i });  // 排除原句自身
+    drawScatter();
+    drawHist();
+  } catch (e) {
+    flash(e.message);
+  }
+}
+
+init();
+</script>
+</body>
+</html>

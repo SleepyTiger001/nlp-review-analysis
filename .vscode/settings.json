@@ -1,0 +1,8 @@
+{
+  // 解释器请用 conda 的 torch-env，不要指向仓库内的 .venv
+  "python.analysis.extraPaths": ["${workspaceFolder}"],
+  "python.terminal.activateEnvironment": true,
+  "files.encoding": "utf8",
+  "python-envs.defaultEnvManager": "ms-python.python:conda",
+  "python-envs.defaultPackageManager": "ms-python.python:conda"
+}

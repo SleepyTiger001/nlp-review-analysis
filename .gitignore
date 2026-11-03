@@ -1,0 +1,26 @@
+# 数据与模型权重不入库：按 README 下载或自行放到这两个目录
+data/*
+!data/.gitkeep
+models/*
+!models/.gitkeep
+
+# 训练产物
+artifacts/
+
+# 本地实验配置（指向未上传的数据）
+configs/local.yaml
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# 系统与工具
+.DS_Store
+.idea/
+.workbuddy/
+*.log
