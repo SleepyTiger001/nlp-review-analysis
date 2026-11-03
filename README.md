@@ -48,7 +48,7 @@ data/<数据集名>/...     # Hugging Face 数据集快照
 models/<模型名>/...     # Embedding 权重
 ```
 
-`prepare` 自动下载，也可以手动：
+`prepare` 自动下载（仓库同时提供 bin 与 safetensors 权重时只下后者），也可以手动：
 
 ```bash
 hf download --repo-type dataset lansinuote/ChnSentiCorp --local-dir data/ChnSentiCorp

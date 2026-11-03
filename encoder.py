@@ -9,7 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
-from huggingface_hub import snapshot_download
+from huggingface_hub import list_repo_files, snapshot_download
 from sentence_transformers import SentenceTransformer
 
 from config import Config
@@ -27,7 +27,15 @@ def resolve_embedding_model(cfg: Config) -> Path:
     if not (target / "config.json").exists():
         print(f"下载 Embedding 模型 {spec} → {target}")
         try:
-            snapshot_download(repo_id=spec, local_dir=str(target))
+            # 仓库同时提供 bin 与 safetensors 时只下后者，体积减半
+            ignore = (
+                ["pytorch_model.bin"]
+                if "model.safetensors" in list_repo_files(spec)
+                else []
+            )
+            snapshot_download(
+                repo_id=spec, local_dir=str(target), ignore_patterns=ignore
+            )
         except Exception as exc:  # 网络问题给出可操作的提示
             raise RuntimeError(
                 f"Embedding 模型下载失败：{exc}\n"
