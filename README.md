@@ -133,14 +133,14 @@ python webapp.py -c configs/classification.yaml         # 网页工作台（另�
 
 ## 9. 网页工作台
 
-交互预测、句向量热力图、测试集 t-SNE 散点（可点选）、最近邻样本、模型输出分布、测试指标。
+交互预测、句向量热力图、测试集 t-SNE 散点（可点选）、最近邻样本、模型输出分布、测试指标，
+以及「词云对比」标签页（好评 / 差评两张词云 + 特色词对比，见第 12 节）。
 分类显示类别与 decision function 标尺；多于两类的多分类自动降级为按「预测正确 / 错误」着色；
 回归显示预测评分，散点按真实标签高低着色。
 `refit_full: true` 时，工作台的判定来自全量重训后的交付模型（对测试集属 in-sample 口径），顶部指标徽章仍来自留出测试集。
 默认只监听 `127.0.0.1`（可用 `--host` 改绑）。
 
 ## 10. 常见问题
-
 1. **cuda / MPS 报错**：cuda 提示「检测不到 GPU」说明装的是 CPU 版 torch，按官网命令重装；MPS 报错可先用 `--device cpu` 绕过。
 2. **显存不足**：调小 `embedding.batch_size`；长文本再调小 `embedding.chunk_chars`。
 3. **下载慢或超时**：设 `HF_ENDPOINT=https://hf-mirror.com`，或用 `hf download` 手动下载。
@@ -158,3 +158,31 @@ mypy main.py config.py data.py encoder.py modeling.py webapp.py
 - 示例模型：[`BAAI/bge-small-zh-v1.5`](https://huggingface.co/BAAI/bge-small-zh-v1.5)
 
 仓库不附带数据与权重；公开分发或商用前请自行核对各自的使用条款。
+
+## 12. 豆瓣影评回归（作业增量）
+
+在原有流水线上增量实现了「豆瓣短评 → 星级」的完整链路，电影为《给阿嬷的情书》（豆瓣 subject 37116446）。
+
+| 新增文件 | 作用 |
+| --- | --- |
+| `scripts/douban_login.py` | 用本机 Edge 打开有头窗口，由用户本人登录，检测到 `dbcl2` cookie 后把登录态存为 `data/douban/storage_state.json`，并在同一会话内验证短评页 |
+| `scripts/douban_scrape.py` | 复用登录态翻页抓短评，解析文本 / 星级（`allstar*` 换算 1-5）/ 时间，翻页间隔 3.5 秒 + 随机抖动，输出 `data/douban/<电影名>.jsonl` |
+| `configs/douban.yaml` | `task: regression`、`source: local`、`chunk_chars: 300`、Ridge 调参网格 |
+| `wordcloud_panel.py` | jieba 分词 + 停用词 + wordcloud 出图，按 4-5 星 / 1-2 星分组，并按每万词频挑出对比词 |
+| `assets/stopwords_zh.txt` | 影评场景停用词表（375 词），滤掉虚词与「电影/一部/这部」这类无区分度泛称 |
+
+```bash
+python scripts/douban_login.py                                  # 有头登录，存登录态
+python scripts/douban_scrape.py --target 420                     # 抓短评（豆瓣约 400 条封顶）
+python main.py train -c configs/douban.yaml                      # 训练 + 五指标
+python webapp.py -c configs/douban.yaml                          # 工作台，顶部「词云对比」标签页
+```
+
+工作台新增 `GET /api/wordcloud`：返回两组词云的 PNG（base64）、高频词与对比词，结果进程内缓存（首次约 2-3 秒）。
+`webapp.py` 同时修了两处：测试集小于 50 条时 `PCA(n_components=50)` 会直接报错（改成 `min(50, n-1, dim)`，perplexity 同步自适应），以及开启 `TEMPLATES_AUTO_RELOAD` 让改模板不必重启。
+
+**本次数据与结果**：391 条短评（1★34 / 2★27 / 3★75 / 4★80 / 5★175），按 8:1:1 切分为 312/39/40。
+测试集 R² 0.435、RMSE 1.019、MAE 0.804、Pearson 0.717、Spearman 0.670。
+预测值明显向均值压缩（预测标准差 0.68，真实 1.36）：真实 1★ 的平均预测 2.75、5★ 的 4.28，方向对但强度不足，
+单条极端短评会互相越界，适合判断倾向而非给出精确分数。登录态文件 `data/douban/storage_state.json` 含账号 cookie，
+已在 `.gitignore` 覆盖范围内，不要提交或外传。

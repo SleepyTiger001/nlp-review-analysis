@@ -1,0 +1,33 @@
+# 回归任务：豆瓣短评 → 星级评分（1-5）
+# 数据来自 scripts/douban_scrape.py 抓取的《给阿嬷的情书》短评
+# 用法：python main.py train -c configs/douban.yaml
+task: regression
+
+data:
+  source: local
+  path: data/douban/给阿嬷的情书.jsonl
+  text_column: text
+  label_column: score
+  # 单文件按 8:1:1 随机切分（回归任务不分层）
+  split_column: null
+  max_samples: null
+
+embedding:
+  model: BAAI/bge-small-zh-v1.5
+  batch_size: 32
+  # 短评中位长度约 94 字、最长 350 字，超过 300 字的少数长评切块后取平均
+  chunk_chars: 300
+
+model:
+  name: ridge
+  param_grid:
+    alpha: [0.1, 1.0, 3.0, 10.0, 30.0, 100.0, 300.0]
+  # 评估后在全量数据上重训交付模型
+  refit_full: true
+
+runtime:
+  device: cpu
+  seed: 42
+
+output:
+  dir: artifacts/douban

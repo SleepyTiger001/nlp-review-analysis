@@ -15,6 +15,7 @@
     GET  /api/sample?i= 散点下标 → 该样本的向量、模型输出与原文
     GET  /api/hist      测试集全量的模型输出分布
     GET  /api/space     t-SNE 投影；首次计算几十秒，结果缓存到 artifacts/
+    GET  /api/wordcloud 词云面板：好评 / 差评两组分词词云与对比词（首次约 3 秒，进程内缓存）
 """
 
 from __future__ import annotations
@@ -41,9 +42,12 @@ from modeling import decision_scores
 app = Flask(__name__)
 app.config.setdefault("DEVICE", "auto")
 app.config.setdefault("CONFIG_PATH", "configs/classification.yaml")
+# 改模板不必重启服务（debug=False 时 Flask 默认不重载模板）
+app.config.setdefault("TEMPLATES_AUTO_RELOAD", True)
 
 _state_lock = threading.Lock()
 _space_lock = threading.Lock()
+_cloud_lock = threading.Lock()
 _state: dict[str, Any] = {}
 
 
@@ -406,10 +410,16 @@ def api_space() -> Any:
         from sklearn.manifold import TSNE
 
         seed = state["cfg"].runtime.seed
-        print(f"计算 t-SNE 投影（{len(sub['y'])} 个点，首次约需几十秒）…")
-        X50 = PCA(n_components=50, random_state=seed).fit_transform(sub["X"])
+        # PCA 组件数不能超过 min(样本数, 特征数)：小测试集（如回归任务 40 条）会直接报错
+        n_pca = max(2, min(50, sub["X"].shape[0] - 1, sub["X"].shape[1]))
+        perplexity = max(2.0, min(30.0, (len(sub["y"]) - 1) / 3.0))
+        print(
+            f"计算 t-SNE 投影（{len(sub['y'])} 个点，先降到 {n_pca} 维，"
+            f"perplexity={perplexity:.0f}，首次约需几十秒）…"
+        )
+        X50 = PCA(n_components=n_pca, random_state=seed).fit_transform(sub["X"])
         xy = (
-            TSNE(n_components=2, init="pca", perplexity=30, random_state=seed)
+            TSNE(n_components=2, init="pca", perplexity=perplexity, random_state=seed)
             .fit_transform(X50)
             .astype(np.float32)
         )
@@ -426,6 +436,56 @@ def api_space() -> Any:
             "preds": preds,
         }
     )
+
+
+@app.get("/api/wordcloud")
+def api_wordcloud() -> Any:
+    """好评 / 差评分组词云：jieba 分词 + 停用词 + wordcloud，结果进程内缓存。"""
+    try:
+        state = get_state()
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 503
+
+    if "cloud" in state:
+        return jsonify(state["cloud"])
+
+    with _cloud_lock:
+        if "cloud" in state:
+            return jsonify(state["cloud"])
+        try:
+            from wordcloud_panel import analyze
+        except ImportError as exc:  # 缺 jieba / wordcloud 时明确报错，不影响其他面板
+            return jsonify({"error": f"词云依赖缺失：{exc}；pip install jieba wordcloud"}), 503
+
+        cfg = state["cfg"]
+        stopwords = cfg.root / "assets" / "stopwords_zh.txt"
+        if not stopwords.exists():
+            return jsonify({"error": f"缺少停用词表 {stopwords}"}), 503
+
+        try:
+            bundle = load_dataset_bundle(cfg, verbose=False)
+        except Exception as exc:
+            return jsonify({"error": f"读取数据集失败：{exc}"}), 503
+
+        start = time.perf_counter()
+        texts: list[str] = []
+        scores: list[float] = []
+        for split in ("train", "validation", "test"):
+            texts.extend(bundle.texts.get(split, []))
+            scores.extend(float(v) for v in bundle.labels.get(split, []))
+
+        try:
+            payload = analyze(texts, scores, str(stopwords))
+        except Exception as exc:
+            return jsonify({"error": f"词云生成失败：{exc}"}), 500
+
+        payload["total"] = len(texts)
+        payload["elapsed_ms"] = round((time.perf_counter() - start) * 1000)
+        state["cloud"] = payload
+        print(
+            f"词云已生成：{payload['sizes']}，耗时 {payload['elapsed_ms']} ms"
+        )
+        return jsonify(payload)
 
 
 def main() -> None:

@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>文本分析工作台</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%234f46e5'/%3E%3Ctext x='16' y='23' font-size='19' text-anchor='middle' fill='white' font-family='sans-serif'%3E文%3C/text%3E%3C/svg%3E">
 <style>
   :root {
     --bg: #f6f4ef;
@@ -223,6 +224,66 @@
     opacity: 0; transition: opacity .25s; pointer-events: none; z-index: 60;
   }
   #toast.show { opacity: 1; }
+  /* ---------- 词云面板 ---------- */
+  .tabs {
+    display: flex; gap: 4px; background: #fff; border: 1px solid var(--border);
+    border-radius: 999px; padding: 4px; box-shadow: 0 1px 2px rgba(0,0,0,.03);
+  }
+  .tab {
+    border: 0; background: transparent; border-radius: 999px; padding: 6px 16px;
+    font: inherit; font-size: 13.5px; font-weight: 600; color: #6b7280;
+    cursor: pointer; transition: background .15s, color .15s;
+  }
+  .tab:hover { color: #374151; background: #f6f4ef; }
+  .tab.active {
+    background: linear-gradient(135deg, #4f46e5, #4338ca); color: #fff;
+    box-shadow: 0 2px 8px rgba(79,70,229,.25);
+  }
+
+  #view-cloud { grid-template-rows: minmax(0, 1fr) minmax(190px, 0.56fr); }
+  .cloud-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 13px; min-height: 0; }
+  .c-cloud, .c-contrast { display: flex; flex-direction: column; min-height: 0; }
+  .cloud-head { display: flex; align-items: baseline; gap: 10px; flex-shrink: 0; }
+  .cloud-head h2 { margin-bottom: 0; }
+  .cloud-count { font-size: 12.5px; color: #6b7280; }
+  .cloud-img-wrap {
+    flex: 1; min-height: 0; margin-top: 10px; display: flex;
+    align-items: center; justify-content: center;
+    background: #fbfaf8; border: 1px solid var(--border);
+    border-radius: 12px; padding: 6px; overflow: hidden;
+  }
+  .cloud-img-wrap img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 8px; display: block; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; flex-shrink: 0; }
+  .chip {
+    border-radius: 999px; padding: 3px 10px; font-size: 12.5px;
+    border: 1px solid var(--border); background: #f8f7f3; color: #4b5563;
+  }
+  .chip b { font-weight: 700; color: #111827; }
+
+  .cloud-foot { display: grid; grid-template-columns: 1fr; gap: 13px; min-height: 0; overflow: hidden; }
+  .cloud-foot > .card { height: 100%; min-height: 0; }
+
+  .contrast-cols {
+    flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr;
+    gap: 24px; overflow: hidden;
+  }
+  .contrast-cols > div { display: flex; flex-direction: column; min-height: 0; }
+  .contrast-cols h3 { font-size: 13px; font-weight: 700; margin-bottom: 7px; flex-shrink: 0; }
+  .contrast-cols .h-pos { color: #0f766e; }
+  .contrast-cols .h-neg { color: #be123c; }
+  .contrast-cols ul {
+    list-style: none; flex: 1; min-height: 0; overflow-y: auto;
+    display: flex; flex-direction: column; gap: 3px;
+  }
+  .contrast-cols li {
+    display: grid; grid-template-columns: 72px 1fr 50px; align-items: center; gap: 9px;
+    font-size: 12.5px; color: #374151; line-height: 1.35; flex-shrink: 0;
+  }
+  .contrast-cols li em { font-style: normal; color: #6b7280; text-align: right; font-variant-numeric: tabular-nums; }
+  .bar { height: 7px; border-radius: 999px; background: #f1efe9; overflow: hidden; }
+  .bar i { display: block; height: 100%; border-radius: 999px; background: #0d9488; }
+  .c-contrast .bar i { background: #0d9488; }
+  #spec-neg .bar i { background: #e11d48; }
 </style>
 </head>
 <body>
@@ -231,6 +292,10 @@
   <div class="brand">
     <div class="logo">文</div>
     <h1 id="app-title">文本分析工作台</h1>
+  </div>
+  <div class="tabs">
+    <button class="tab active" data-view="main">预测工作台</button>
+    <button class="tab" data-view="cloud">词云对比</button>
   </div>
   <div class="badges">
     <span class="badge" id="badge-model">…</span>
@@ -241,7 +306,7 @@
   </div>
 </header>
 
-<main>
+<main id="view-main">
   <div class="row-top">
     <section class="card c-input">
       <h2>输入文本</h2>
@@ -320,6 +385,42 @@
 
 <div id="tooltip" class="tooltip hidden"></div>
 <div id="toast"></div>
+
+<main id="view-cloud" class="hidden">
+  <div class="cloud-grid">
+    <section class="card c-cloud">
+      <div class="cloud-head">
+        <h2>好评词云 · 4-5 星</h2>
+        <span class="cloud-count" id="cloud-pos-count">加载中…</span>
+      </div>
+      <div class="cloud-img-wrap"><img id="cloud-pos-img" alt="好评词云"></div>
+      <div class="chips" id="cloud-pos-chips"></div>
+    </section>
+    <section class="card c-cloud">
+      <div class="cloud-head">
+        <h2>差评词云 · 1-2 星</h2>
+        <span class="cloud-count" id="cloud-neg-count">加载中…</span>
+      </div>
+      <div class="cloud-img-wrap"><img id="cloud-neg-img" alt="差评词云"></div>
+      <div class="chips" id="cloud-neg-chips"></div>
+    </section>
+  </div>
+  <div class="cloud-foot">
+    <section class="card c-contrast">
+      <h2>特色词对比 · 按每万词出现次数归一化，抵消两组样本量差异</h2>
+      <div class="contrast-cols">
+        <div>
+          <h3 class="h-pos">好评更常说</h3>
+          <ul id="spec-pos"></ul>
+        </div>
+        <div>
+          <h3 class="h-neg">差评更常说</h3>
+          <ul id="spec-neg"></ul>
+        </div>
+      </div>
+    </section>
+  </div>
+</main>
 
 <script>
 "use strict";
@@ -868,6 +969,63 @@ async function pickSample(i) {
     flash(e.message);
   }
 }
+
+/* ---------- 词云面板 ---------- */
+const cloudState = { loaded: false, loading: false };
+
+async function loadCloud() {
+  if (cloudState.loaded || cloudState.loading) return;
+  cloudState.loading = true;
+  $("cloud-pos-count").textContent = "分词与出图中…";
+  $("cloud-neg-count").textContent = "分词与出图中…";
+  try {
+    const d = await api("/api/wordcloud");
+    const labels = { pos: "好评", neg: "差评" };
+    for (const p of d.panels) {
+      $("cloud-" + p.key + "-img").src = p.image;
+      $("cloud-" + p.key + "-count").textContent =
+        p.n + " 条 · " + p.unique_words + " 个词种";
+      $("cloud-" + p.key + "-chips").innerHTML = p.top.slice(0, 12)
+        .map((w) => '<span class="chip">' + w.word + " <b>" + w.count + "</b></span>")
+        .join("");
+    }
+    fillSpec("pos", d.specific.pos);
+    fillSpec("neg", d.specific.neg);
+    $("cloud-pos-count").textContent += " · " + labels.pos;
+    cloudState.loaded = true;
+  } catch (e) {
+    $("cloud-pos-count").textContent = "加载失败";
+    $("cloud-neg-count").textContent = "加载失败";
+    flash(e.message);
+  } finally {
+    cloudState.loading = false;
+  }
+}
+
+function fillSpec(key, items) {
+  if (!items || !items.length) return;
+  const vals = items.map((x) => (key === "pos" ? x.pos_per_10k : x.neg_per_10k));
+  const max = Math.max(...vals, 1);
+  $("spec-" + key).innerHTML = items.map((x, i) => {
+    const pct = Math.round((vals[i] / max) * 100);
+    return "<li><span>" + x.word + "</span>"
+      + '<div class="bar"><i style="width:' + pct + '%"></i></div>'
+      + "<em>" + vals[i].toFixed(1) + "‰</em></li>";
+  }).join("");
+}
+
+function switchView(view) {
+  document.querySelectorAll(".tab").forEach((b) => {
+    b.classList.toggle("active", b.dataset.view === view);
+  });
+  $("view-main").classList.toggle("hidden", view !== "main");
+  $("view-cloud").classList.toggle("hidden", view !== "cloud");
+  if (view === "cloud") loadCloud();
+}
+
+document.querySelectorAll(".tab").forEach((b) => {
+  b.addEventListener("click", () => switchView(b.dataset.view));
+});
 
 init();
 </script>
