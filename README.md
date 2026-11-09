@@ -171,11 +171,22 @@ mypy main.py config.py data.py encoder.py modeling.py webapp.py
 | `wordcloud_panel.py` | jieba 分词 + 停用词 + wordcloud 出图，按 4-5 星 / 1-2 星分组，并按每万词频挑出对比词 |
 | `assets/stopwords_zh.txt` | 影评场景停用词表（375 词），滤掉虚词与「电影/一部/这部」这类无区分度泛称 |
 
+**评阅只需这三条**（数据集 `data/douban/给阿嬷的情书.jsonl` 已随仓库提供，无需爬取）：
+
 ```bash
-python scripts/douban_login.py                                  # 有头登录，存登录态
-python scripts/douban_scrape.py --target 420                     # 抓短评（豆瓣约 400 条封顶）
-python main.py train -c configs/douban.yaml                      # 训练 + 五指标
-python webapp.py -c configs/douban.yaml                          # 工作台，顶部「词云对比」标签页
+python main.py train -c configs/douban.yaml     # 首次运行会自动下载 bge-small-zh-v1.5 到 models/（约 90 MB）
+python main.py embed -c configs/douban.yaml "测试"   # 验证：512 维、L2 范数 1.000000
+python webapp.py -c configs/douban.yaml         # 工作台，顶部「词云对比」标签页
+```
+
+模型权重不入库（体积太大）。若下载失败，设镜像重试：`export HF_ENDPOINT=https://hf-mirror.com`，
+或手动 `hf download BAAI/bge-small-zh-v1.5 --local-dir models/bge-small-zh-v1.5`。
+
+**想自己重新爬取**（可选，需要你自己的豆瓣登录态，仓库不含）：
+
+```bash
+python scripts/douban_login.py                  # 有头浏览器由本人登录，存 data/douban/storage_state.json
+python scripts/douban_scrape.py --target 420    # 抓短评，豆瓣该片约 400 条封顶
 ```
 
 工作台新增 `GET /api/wordcloud`：返回两组词云的 PNG（base64）、高频词与对比词，结果进程内缓存（首次约 2-3 秒）。

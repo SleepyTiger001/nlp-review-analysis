@@ -1,6 +1,11 @@
 # 数据与模型权重不入库：按 README 下载或自行放到这两个目录
 data/*
 !data/.gitkeep
+# 例外：作业用的短评数据集随仓库提供（评阅时无需爬取），
+# 但同目录下的登录态 storage_state.json 含账号 cookie，必须继续忽略
+!data/douban/
+data/douban/*
+!data/douban/*.jsonl
 models/*
 !models/.gitkeep
 
