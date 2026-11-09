@@ -8,6 +8,11 @@ data/douban/*
 !data/douban/*.jsonl
 models/*
 !models/.gitkeep
+# 例外：作业用的 bge-small-zh-v1.5 权重随仓库提供（约 92MB），
+# 让评阅者 clone 后无需联网下载即可直接跑 train / webapp；
+# 只排除 huggingface 的下载缓存元数据
+!models/bge-small-zh-v1.5/
+models/bge-small-zh-v1.5/.cache/
 
 # 训练产物
 artifacts/

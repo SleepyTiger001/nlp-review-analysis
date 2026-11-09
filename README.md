@@ -171,16 +171,17 @@ mypy main.py config.py data.py encoder.py modeling.py webapp.py
 | `wordcloud_panel.py` | jieba 分词 + 停用词 + wordcloud 出图，按 4-5 星 / 1-2 星分组，并按每万词频挑出对比词 |
 | `assets/stopwords_zh.txt` | 影评场景停用词表（375 词），滤掉虚词与「电影/一部/这部」这类无区分度泛称 |
 
-**评阅只需这三条**（数据集 `data/douban/给阿嬷的情书.jsonl` 已随仓库提供，无需爬取）：
+**评阅直接跑这三条**（数据集与 embedding 权重都已随仓库提供，clone 后无需联网下载、无需爬取）：
 
 ```bash
-python main.py train -c configs/douban.yaml     # 首次运行会自动下载 bge-small-zh-v1.5 到 models/（约 90 MB）
+python main.py train -c configs/douban.yaml     # 训练 + 五指标，CPU 约 1 分钟
 python main.py embed -c configs/douban.yaml "测试"   # 验证：512 维、L2 范数 1.000000
 python webapp.py -c configs/douban.yaml         # 工作台，顶部「词云对比」标签页
 ```
 
-模型权重不入库（体积太大）。若下载失败，设镜像重试：`export HF_ENDPOINT=https://hf-mirror.com`，
-或手动 `hf download BAAI/bge-small-zh-v1.5 --local-dir models/bge-small-zh-v1.5`。
+`models/bge-small-zh-v1.5/`（约 92MB）与 `data/douban/给阿嬷的情书.jsonl`（391 条）都在仓库内。
+若权重被误删，`train` 会自动重新下载；下载不畅可设镜像 `export HF_ENDPOINT=https://hf-mirror.com`。
+登录态 `data/douban/storage_state.json` 含账号 cookie，**不在仓库内**，也不应提交。
 
 **想自己重新爬取**（可选，需要你自己的豆瓣登录态，仓库不含）：
 

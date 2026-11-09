@@ -1,0 +1,4 @@
+# 本目录是 BAAI/bge-small-zh-v1.5 的本地副本，供作业评阅直接使用。
+# Hugging Face 官方仓库自带的规则会把 *.safetensors 等后缀交给 Git LFS，
+# 而 GitHub 不允许公开 fork 向父仓库的 LFS 存储上传新对象，
+# 因此这里移除全部 filter=lfs 规则，权重按普通二进制文件（约 92MB）随仓库提交。
